@@ -1,6 +1,8 @@
 import torch 
 import torch.nn as nn
 import torch.nn.functional as F
+
+
 def scaled_dpa(query, key, value, mask=None):
     """
     Implementation of Scaled Dot-Product Attention from `Attention is All You Need`.
@@ -23,4 +25,23 @@ def scaled_dpa(query, key, value, mask=None):
     output = torch.matmul(attention_weights, value)
     return output, attention_weights
 
+
+class MultiHeadAttention(nn.Module):
+
+    def __init__(self, num_heads, d_model, dropout=0.1):
+        super(MultiHeadAttention, self).__init__()
+        assert d_model % num_heads == 0
+        self.num_heads = num_heads
+        self.d_model = d_model
+
+        # The paper assumes d_k=d_v=d_model/num_heads throughout. They take it to be 64
+        self.d_k = d_model // num_heads
+        self.query_linear = torch.nn.Linear(d_model, d_model)
+        self.key_linaer = torch.nn.Linear(d_model, d_model)
+        self.value_linear = torch.nn.Linear(d_model, d_model)
+        self.output_linear = torch.nn.Linear(d_model, d_model)
+
+    def forward(self, query, key, value, mask=None):
+        batch_size = query.size(0)
+        pass
 
