@@ -13,9 +13,9 @@ def scaled_dpa(query, key, value, mask=None):
         mask:
     """
     d_k = query.size(-1)
-    scores = torch.matmul(query, key.transpose(-1, -2)) # Dimension (bs, nh, sl, sl)
+    scores = torch.matmul(query, key.transpose(-1, -2)) # Dimension (bs, nh, t, d_k)
 
-    # normalize the scores
+    # normalize the scores by the root of the dimension
     scores = scores/torch.sqrt(torch.tensor(d_k, dtype=torch.float))
     
     # Where the mask is 0, we replace the scores entry with -\infty
@@ -34,6 +34,7 @@ class MultiHeadAttention(nn.Module):
         assert d_model % num_heads == 0, "d_model must be divisible by num_heads."
         self.num_heads = num_heads
         self.d_model = d_model
+        self.d_k = d_model // num_heads
 
         # The paper assumes d_k=d_v=d_model/num_heads throughout. They take it to be 64
         self.d_k = d_model // num_heads
@@ -56,7 +57,18 @@ class MultiHeadAttention(nn.Module):
 
         # Reshape and split into the number of heads, resulting dimensions bs, num_heads, t, d_k
         # TODO(dominic): There is some interesting technical reasons why you have to reshape this way and then transpose. Do some examples in a notebook to see why. 
-        query = query.view(batch_size, -1, self.num_heads, 
+        query = query.view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2) # bs, num_heads, t, d_k
+        key = key.view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2) # bs, num_heads, t, d_k
+        value = key.view(batch_size, -1, self.num_heads, self.d_k).transpose(1,2) # bs, num_heads, t, d_k
+        
+        # Apply scaled dot product attention to each head separately
+        attention_output, attention_weight = scaled_dpa(query, key, value, mask)
+        
+        
+        # Concatenate the heads
+        # attention_output shape: (bs, nh, t, d_k)
+        attention_output = attention_output.transpose(1, 2).contiguous().view(batch_size, -1, self.d_model)
+        return self.output_linear(attention_output) # bs, t, d_model
 
 
 
@@ -81,5 +93,4 @@ class EncoderDecoder(nn.Module):
 
     def decode(self, hstates, src_mask, tgt, tgt_mask): # why does the decoder need the source mask??
         return self.decoder(self.tgt_embedder(tgt), hstates, src_mask, tgt_mask)
-
  
