@@ -10,17 +10,20 @@ def scaled_dpa(query, key, value, mask=None):
         query: (batch_size, num_heads, seq_length, dim_k)
         key: (batch_size, num_heads, seq_length, dim_k)
         value: (batch_size, num_heads, seq_length, dim_v)
-        mask:
+        mask: (batch_size, num_heads, seq_length, seq_length)
+    Returns:
+        output: (batch_size, num_heads, seq_length, dim_v)
+        attention_weights: (batch_size, num_heads, seq_length, seq_length)
     """
     d_k = query.size(-1)
     scores = torch.matmul(query, key.transpose(-1, -2)) # Dimension (bs, nh, t, d_k)
 
     # normalize the scores by the root of the dimension
-    scores = scores/torch.sqrt(torch.tensor(d_k, dtype=torch.float))
+    scores = scores/torch.sqrt(torch.tensor(d_k, dtype=torch.float)) # bs, nh, t, t
     
     # Where the mask is 0, we replace the scores entry with -\infty
     if mask is not None:
-        scores = scores.masked_fill(mask==0, float("-inf"))
+        scores = scores.masked_fill(mask==0, float("-inf")) # bs, nh, t, t
 
     attention_weights = F.softmax(scores, dim=-1) # softmax along rows, each row is a probability vector
     output = torch.matmul(attention_weights, value)
@@ -39,7 +42,7 @@ class MultiHeadAttention(nn.Module):
         # The paper assumes d_k=d_v=d_model/num_heads throughout. They take it to be 64
         self.d_k = d_model // num_heads
         self.query_linear = nn.Linear(d_model, d_model)
-        self.key_linaer = nn.Linear(d_model, d_model)
+        self.key_linear = nn.Linear(d_model, d_model)
         self.value_linear = nn.Linear(d_model, d_model)
         self.dropout = nn.Dropout(p=dropout)
         self.output_linear = nn.Linear(d_model, d_model)
