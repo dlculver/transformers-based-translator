@@ -10,7 +10,7 @@ def scaled_dpa(query, key, value, mask=None):
         query: (batch_size, num_heads, seq_length, dim_k)
         key: (batch_size, num_heads, seq_length, dim_k)
         value: (batch_size, num_heads, seq_length, dim_v)
-        mask: (batch_size, num_heads, seq_length, seq_length)
+        mask: (batch_size, num_heads, seq_length, seq_length) or None
     Returns:
         output: (batch_size, num_heads, seq_length, dim_v)
         attention_weights: (batch_size, num_heads, seq_length, seq_length)
@@ -82,6 +82,47 @@ class MultiHeadAttention(nn.Module):
             .view(batch_size, -1, self.d_model)
         )
         return self.output_linear(attention_output)  # bs, t, d_model
+
+class PositionwiseFFN(nn.Module):
+    
+    def __init__(self, d_ff, d_model, dropout = 0.1):
+        super(PositionwiseFFN, self).__init__()
+        self.linear1 = nn.Linear(d_model, d_ff)
+        self.linear2 = nn.Linear(d_ff, d_model)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        return self.linear2(self.dropout(self.linear1(x)))
+
+class TransformerBlock(nn.Module):
+    
+    def __init__(self, num_heads, d_model, d_ff, dropout = 0.1):
+        super(TransformerBlock, self).__init__()
+        self.mha = MultiHeadAttention(num_heads, d_model, dropout)
+        self.ffn = PositionwiseFFN(d_ff, d_model, dropout)
+        self.layernorm1 = nn.LayerNorm(d_model)
+        self.layernorm2 = nn.LayerNorm(d_model)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, query, key, value, mask = None):
+        # Pass through the multihead attention block and layer norm with residual connection
+        attn_output = self.mha(key, query, value, mask)
+        out1 = self.layernorm1(query + self.dropout(attn_output))
+
+        # feedforward, layer norm, and residual connection
+        ff_output = self.ffn(out1)
+        out2 = self.layernorm2(out1 + self.dropout(ff_output))
+
+        return out2
+
+
+class Encoder(nn.Module):
+
+    def __init__(self, num_blocks, num_heads, d_model, d_ff, dropout = 0.1):
+        super(Encoder, self).__init__()
+       pass 
+
+       
 
 
 class EncoderDecoder(nn.Module):
