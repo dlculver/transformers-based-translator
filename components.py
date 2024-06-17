@@ -1,4 +1,4 @@
-import torch 
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -16,22 +16,23 @@ def scaled_dpa(query, key, value, mask=None):
         attention_weights: (batch_size, num_heads, seq_length, seq_length)
     """
     d_k = query.size(-1)
-    scores = torch.matmul(query, key.transpose(-1, -2)) # Dimension (bs, nh, t, d_k)
+    scores = torch.matmul(query, key.transpose(-1, -2))  # Dimension (bs, nh, t, d_k)
 
     # normalize the scores by the root of the dimension
-    scores = scores/torch.sqrt(torch.tensor(d_k, dtype=torch.float)) # bs, nh, t, t
-    
+    scores = scores / torch.sqrt(torch.tensor(d_k, dtype=torch.float))  # bs, nh, t, t
+
     # Where the mask is 0, we replace the scores entry with -\infty
     if mask is not None:
-        scores = scores.masked_fill(mask==0, float("-inf")) # bs, nh, t, t
+        scores = scores.masked_fill(mask == 0, float("-inf"))  # bs, nh, t, t
 
-    attention_weights = F.softmax(scores, dim=-1) # softmax along rows, each row is a probability vector
+    attention_weights = F.softmax(
+        scores, dim=-1
+    )  # softmax along rows, each row is a probability vector
     output = torch.matmul(attention_weights, value)
     return output, attention_weights
 
 
 class MultiHeadAttention(nn.Module):
-
     def __init__(self, num_heads, d_model, dropout=0.1):
         super(MultiHeadAttention, self).__init__()
         assert d_model % num_heads == 0, "d_model must be divisible by num_heads."
@@ -52,48 +53,60 @@ class MultiHeadAttention(nn.Module):
         # key shape is bs, t, d_model
         # value shape is bs, d_model, d_model
         batch_size = query.size(0)
-        
+
         # Apply the linear layers
-        query = self.query_linear(query) # shape bs, t, d_model
-        key = self.key_linear(key) # shape bs, t, d_model
-        value = self.value_linear(value) # shape bs, t, d_model
+        query = self.query_linear(query)  # shape bs, t, d_model
+        key = self.key_linear(key)  # shape bs, t, d_model
+        value = self.value_linear(value)  # shape bs, t, d_model
 
         # Reshape and split into the number of heads, resulting dimensions bs, num_heads, t, d_k
-        # TODO(dominic): There is some interesting technical reasons why you have to reshape this way and then transpose. Do some examples in a notebook to see why. 
-        query = query.view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2) # bs, num_heads, t, d_k
-        key = key.view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2) # bs, num_heads, t, d_k
-        value = key.view(batch_size, -1, self.num_heads, self.d_k).transpose(1,2) # bs, num_heads, t, d_k
-        
+        # TODO(dominic): There is some interesting technical reasons why you have to reshape this way and then transpose. Do some examples in a notebook to see why.
+        query = query.view(batch_size, -1, self.num_heads, self.d_k).transpose(
+            1, 2
+        )  # bs, num_heads, t, d_k
+        key = key.view(batch_size, -1, self.num_heads, self.d_k).transpose(
+            1, 2
+        )  # bs, num_heads, t, d_k
+        value = key.view(batch_size, -1, self.num_heads, self.d_k).transpose(
+            1, 2
+        )  # bs, num_heads, t, d_k
+
         # Apply scaled dot product attention to each head separately
         attention_output, attention_weight = scaled_dpa(query, key, value, mask)
-        
-        
+
         # Concatenate the heads
         # attention_output shape: (bs, nh, t, d_k)
-        attention_output = attention_output.transpose(1, 2).contiguous().view(batch_size, -1, self.d_model)
-        return self.output_linear(attention_output) # bs, t, d_model
-
+        attention_output = (
+            attention_output.transpose(1, 2)
+            .contiguous()
+            .view(batch_size, -1, self.d_model)
+        )
+        return self.output_linear(attention_output)  # bs, t, d_model
 
 
 class EncoderDecoder(nn.Module):
     """
     A standard Encoder-Decoder architecture.
     """
+
     def __init__(self, encoder, decoder, src_embedder, tgt_embedder, generator):
         super(EncoderDecoder, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
         self.src_embedder = src_embedder
         self.tgt_embedder = tgt_embedder
-        self.generator = generator # what is this doing??
+        self.generator = generator  # what is this doing??
 
     def forward(self, src, tgt, src_mask, tgt_mask):
         # explain this one in your own words....
-        return self.decod(self.encode(src, src_mask), src_mask, tgt, tgt_mask) # why this signature??
+        return self.decod(
+            self.encode(src, src_mask), src_mask, tgt, tgt_mask
+        )  # why this signature??
 
     def encode(self, src, src_mask):
         return self.encoder(self.src_embedder(src), src_mask)
 
-    def decode(self, hstates, src_mask, tgt, tgt_mask): # why does the decoder need the source mask??
+    def decode(
+        self, hstates, src_mask, tgt, tgt_mask
+    ):  # why does the decoder need the source mask??
         return self.decoder(self.tgt_embedder(tgt), hstates, src_mask, tgt_mask)
- 
