@@ -120,7 +120,14 @@ class Encoder(nn.Module):
 
     def __init__(self, num_blocks, num_heads, d_model, d_ff, dropout = 0.1):
         super(Encoder, self).__init__()
-       pass 
+        self.transformer_blocks = nn.ModuleList(
+                [TransformerBlock(num_heads, d_model, d_ff, dropout) for _ in range(num_blocks)]
+        )
+
+    def forward(self, x, mask=None):
+        for block in self.transformer_blocks:
+            x = block(x, x, x, mask)
+        return x
 
        
 
