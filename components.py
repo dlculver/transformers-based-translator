@@ -32,25 +32,32 @@ def scaled_dpa(query, key, value, mask=None):
     output = torch.matmul(attention_weights, value)
     return output, attention_weights
 
+
 class PositionalEncoding(nn.Module):
     """Implementation of the trigonometric positional embeddings from `Attention is all you need`"""
-    def __init__(self, d_model, dropout, max_len = 5000):
+
+    def __init__(self, d_model, dropout, max_len=5000):
         super(PositionalEncoding, self).__init__()
         self.dropout = nn.Dropout(p=dropout)
 
         # compute the positional encodings once in log space?? Why?
-        pe = torch.zeros(max_len, d_model) # shape: max_len, d_model
-        position = torch.arange(0, max_len).unsqueeze(1) # shape: max_len, 1
+        pe = torch.zeros(max_len, d_model)  # shape: max_len, d_model
+        position = torch.arange(0, max_len).unsqueeze(1)  # shape: max_len, 1
         denominator = torch.exp(
-            torch.arange(0, d_model, 2) * -(math.log(10**4) / d_model) # shape: d_model/2
+            torch.arange(0, d_model, 2)
+            * -(math.log(10**4) / d_model)  # shape: d_model/2
         )
         pe[:, 0::2] = torch.sin(position * denominator)
         pe[:, 1::2] = torch.cos(position * denominator)
-        pe = pe.unsqueeze(0) # shape: 1, max_len, d_model. This is necessarily later for broadcasting along the batch dimension.
+        pe = pe.unsqueeze(
+            0
+        )  # shape: 1, max_len, d_model. This is necessarily later for broadcasting along the batch dimension.
         self.register_buffer("pe", pe)
 
     def forward(self, x):
-        x = x + self.pe[:, : x.size(1)].requires_grad_(False) # shape: (bs, t, d_model). In this case the sequence length is determined by x.size(1)
+        x = x + self.pe[:, : x.size(1)].requires_grad_(
+            False
+        )  # shape: (bs, t, d_model). In this case the sequence length is determined by x.size(1)
         return self.dropout(x)
 
 
@@ -137,11 +144,15 @@ class PositionwiseFFN(nn.Module):
 
 #         return out2
 
+
 class EncoderLayer(nn.Module):
     """Encoder layer as in `Attention is All You Need`. We use postlayer normalization."""
+
     def __init__(self, num_heads, d_model, d_ff, dropout=0.1):
         super(EncoderLayer, self).__init__()
-        self.mha = MultiHeadAttention(num_heads=num_heads, d_model=d_model, dropout=dropout)
+        self.mha = MultiHeadAttention(
+            num_heads=num_heads, d_model=d_model, dropout=dropout
+        )
         self.ffn = PositionwiseFFN(d_ff=d_ff, d_model=d_model, dropout=dropout)
         self.layernorm1 = nn.LayerNorm(d_model)
         self.layernorm2 = nn.LayerNorm(d_model)
@@ -159,28 +170,31 @@ class EncoderLayer(nn.Module):
 
         return out2
 
+
 class Encoder(nn.Module):
     def __init__(self, num_blocks, num_heads, d_model, d_ff, dropout=0.1):
         super(Encoder, self).__init__()
         self.encoder_blocks = nn.ModuleList(
             [
-                EncoderLayer(num_heads=num_heads, d_model=d_model, d_ff=d_ff, dropout=dropout)
+                EncoderLayer(
+                    num_heads=num_heads, d_model=d_model, d_ff=d_ff, dropout=dropout
+                )
                 for _ in range(num_blocks)
             ]
         )
-    
+
     def forward(self, x, mask=None):
         for block in self.encoder_blocks:
             x = block(x, mask)
-        
-        return x
 
+        return x
 
 
 class EncoderDecoder(nn.Module):
     """
     A standard Encoder-Decoder architecture.
     """
+
     def __init__(self, encoder, decoder, src_embedder, tgt_embedder, generator):
         super(EncoderDecoder, self).__init__()
         self.encoder = encoder
