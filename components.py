@@ -50,7 +50,8 @@ class PositionalEncoding(nn.Module):
         self.register_buffer("pe", pe)
 
     def forward(self, x):
-        x = x + self.pe[:, : x.size(1)].requires_grad_(False) # x has sequence length x.size(1)
+        x = x + self.pe[:, : x.size(1)].requires_grad_(False) # shape: (bs, t, d_model). In this case the sequence length is determined by x.size(1)
+        return self.dropout(x)
 
 
 class MultiHeadAttention(nn.Module):
@@ -116,48 +117,70 @@ class PositionwiseFFN(nn.Module):
         return self.linear2(self.dropout(self.linear1(x)))
 
 
-class TransformerBlock(nn.Module):
+# class TransformerBlock(nn.Module):
+#     def __init__(self, num_heads, d_model, d_ff, dropout=0.1):
+#         super(TransformerBlock, self).__init__()
+#         self.mha = MultiHeadAttention(num_heads, d_model, dropout)
+#         self.ffn = PositionwiseFFN(d_ff, d_model, dropout)
+#         self.layernorm1 = nn.LayerNorm(d_model)
+#         self.layernorm2 = nn.LayerNorm(d_model)
+#         self.dropout = nn.Dropout(dropout)
+
+#     def forward(self, query, key, value, mask=None):
+#         # Pass through the multihead attention block and layer norm with residual connection
+#         attn_output = self.mha(key, query, value, mask)
+#         out1 = self.layernorm1(query + self.dropout(attn_output))
+
+#         # feedforward, layer norm, and residual connection
+#         ff_output = self.ffn(out1)
+#         out2 = self.layernorm2(out1 + self.dropout(ff_output))
+
+#         return out2
+
+class EncoderLayer(nn.Module):
+    """Encoder layer as in `Attention is All You Need`. We use postlayer normalization."""
     def __init__(self, num_heads, d_model, d_ff, dropout=0.1):
-        super(TransformerBlock, self).__init__()
-        self.mha = MultiHeadAttention(num_heads, d_model, dropout)
-        self.ffn = PositionwiseFFN(d_ff, d_model, dropout)
+        super(EncoderLayer, self).__init__()
+        self.mha = MultiHeadAttention(num_heads=num_heads, d_model=d_model, dropout=dropout)
+        self.ffn = PositionwiseFFN(d_ff=d_ff, d_model=d_model, dropout=dropout)
         self.layernorm1 = nn.LayerNorm(d_model)
         self.layernorm2 = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, query, key, value, mask=None):
-        # Pass through the multihead attention block and layer norm with residual connection
-        attn_output = self.mha(key, query, value, mask)
-        out1 = self.layernorm1(query + self.dropout(attn_output))
+    def forward(self, x, mask=None):
 
-        # feedforward, layer norm, and residual connection
+        # Self-attention
+        attn_output = self.mha(x, x, x, mask)
+        out1 = self.layernorm1(x + self.dropout(attn_output))
+
+        # Feedforward
         ff_output = self.ffn(out1)
         out2 = self.layernorm2(out1 + self.dropout(ff_output))
 
         return out2
 
-
 class Encoder(nn.Module):
     def __init__(self, num_blocks, num_heads, d_model, d_ff, dropout=0.1):
         super(Encoder, self).__init__()
-        self.transformer_blocks = nn.ModuleList(
+        self.encoder_blocks = nn.ModuleList(
             [
-                TransformerBlock(num_heads, d_model, d_ff, dropout)
+                EncoderLayer(num_heads=num_heads, d_model=d_model, d_ff=d_ff, dropout=dropout)
                 for _ in range(num_blocks)
             ]
         )
-
-    def forward(self, x, mask=None):
-        for block in self.transformer_blocks:
-            x = block(x, x, x, mask)
-        return x
     
+    def forward(self, x, mask=None):
+        for block in self.encoder_blocks:
+            x = block(x, mask)
+        
+        return x
+
+
 
 class EncoderDecoder(nn.Module):
     """
     A standard Encoder-Decoder architecture.
     """
-
     def __init__(self, encoder, decoder, src_embedder, tgt_embedder, generator):
         super(EncoderDecoder, self).__init__()
         self.encoder = encoder
