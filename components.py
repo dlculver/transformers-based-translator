@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import math
 
 
 def scaled_dpa(query, key, value, mask=None):
@@ -30,6 +31,26 @@ def scaled_dpa(query, key, value, mask=None):
     )  # softmax along rows, each row is a probability vector
     output = torch.matmul(attention_weights, value)
     return output, attention_weights
+
+class PositionalEncoding(nn.Module):
+    """Implementation of the trigonometric positional embeddings from `Attention is all you need`"""
+    def __init__(self, d_model, dropout, max_len = 5000):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        # compute the positional encodings once in log space?? Why?
+        pe = torch.zeros(max_len, d_model) # shape: max_len, d_model
+        position = torch.arange(0, max_len).unsqueeze(1) # shape: max_len, 1
+        denominator = torch.exp(
+            torch.arange(0, d_model, 2) * -(math.log(10**4) / d_model) # shape: d_model/2
+        )
+        pe[:, 0::2] = torch.sin(position * denominator)
+        pe[:, 1::2] = torch.cos(position * denominator)
+        pe = pe.unsqueeze(0) # shape: 1, max_len, d_model. This is necessarily later for broadcasting along the batch dimension.
+        self.register_buffer("pe", pe)
+
+    def forward(self, x):
+        x = x + self.pe[:, : x.size(1)].requires_grad_(False) # x has sequence length x.size(1)
 
 
 class MultiHeadAttention(nn.Module):
@@ -67,7 +88,7 @@ class MultiHeadAttention(nn.Module):
         key = key.view(batch_size, -1, self.num_heads, self.d_k).transpose(
             1, 2
         )  # bs, num_heads, t, d_k
-        value = key.view(batch_size, -1, self.num_heads, self.d_k).transpose(
+        value = value.view(batch_size, -1, self.num_heads, self.d_k).transpose(
             1, 2
         )  # bs, num_heads, t, d_k
 
@@ -130,7 +151,7 @@ class Encoder(nn.Module):
         for block in self.transformer_blocks:
             x = block(x, x, x, mask)
         return x
-
+    
 
 class EncoderDecoder(nn.Module):
     """
