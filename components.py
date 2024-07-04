@@ -212,7 +212,7 @@ class Decoder(nn.Module):
         num_blocks: int,
         num_heads: int,
         d_model: int,
-        d_ff: model,
+        d_ff: int,
         dropout: float = 0.1,
     ):
         super(Decoder, self).__init__()
