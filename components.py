@@ -230,31 +230,34 @@ class Decoder(nn.Module):
         for block in self.decoder_blocks:
             x = block(x, enc_output, src_mask, tgt_mask)
         return self.layernorm(x)
+    
+class Generator(nn.Module):
+    """Define the standard linear layer followed by softmax generation step. From the havard annotated blog."""
+    def __init__(self, d_model, vocab_size):
+        super(Generator, self).__init__()
+        self.proj = nn.Linear(d_model, vocab_size)
+    
+    def forward(self, x):
+        return F.log_softmax(self.proj(x), dim=-1)
 
 
 class EncoderDecoder(nn.Module):
-    """
-    A standard Encoder-Decoder architecture.
-    """
-
-    def __init__(self, encoder, decoder, src_embedder, tgt_embedder, generator):
+    def __init__(self, encoder: Encoder, decoder: Decoder, src_embed: nn.Module, tgt_embed: nn.Module, generator: Generator):
         super(EncoderDecoder, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
-        self.src_embedder = src_embedder
-        self.tgt_embedder = tgt_embedder
-        self.generator = generator  # what is this doing??
+        self.src_embed = src_embed
+        self.tgt_embed = tgt_embed
+        self.generator = generator
 
     def forward(self, src, tgt, src_mask, tgt_mask):
-        # explain this one in your own words....
-        return self.decod(
-            self.encode(src, src_mask), src_mask, tgt, tgt_mask
-        )  # why this signature??
+        enc_output = self.encode(src, src_mask=src_mask)
+        dec_output = self.decode(tgt, enc_output=enc_output, src_mask=src_mask, tgt_mask=tgt_mask)
+        return self.generator(dec_output)
 
     def encode(self, src, src_mask):
-        return self.encoder(self.src_embedder(src), src_mask)
+        return self.encoder(self.src_embed(src), src_mask)
+    
+    def decode(self, tgt, enc_output, src_mask, tgt_mask):
+        return self.decoder(self.tgt_embed(tgt), enc_output, src_mask, tgt_mask)
 
-    def decode(
-        self, hstates, src_mask, tgt, tgt_mask
-    ):  # why does the decoder need the source mask??
-        return self.decoder(self.tgt_embedder(tgt), hstates, src_mask, tgt_mask)
