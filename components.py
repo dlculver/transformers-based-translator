@@ -224,7 +224,7 @@ class Decoder(nn.Module):
                 for _ in range(num_blocks)
             ]
         )
-        self.layernorm(d_model)
+        self.layernorm = nn.LayerNorm(d_model)
 
     def forward(self, x, enc_output, src_mask=None, tgt_mask=None):
         for block in self.decoder_blocks:
