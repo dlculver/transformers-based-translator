@@ -17,7 +17,7 @@ def scaled_dpa(query, key, value, mask=None):
         attention_weights: (batch_size, num_heads, seq_length, seq_length)
     """
     d_k = query.size(-1)
-    scores = torch.matmul(query, key.transpose(-1, -2))  # Dimension (bs, nh, t, d_k)
+    scores = torch.matmul(query, key.transpose(-2, -1))  # Dimension (bs, nh, t, d_k)
 
     # normalize the scores by the root of the dimension
     scores = scores / torch.sqrt(torch.tensor(d_k, dtype=torch.float))  # bs, nh, t, t
@@ -52,7 +52,7 @@ class PositionalEncoding(nn.Module):
         pe = pe.unsqueeze(
             0
         )  # shape: 1, max_len, d_model. This is necessarily later for broadcasting along the batch dimension.
-        self.register_buffer("pe", pe)
+        self.register_buffer("pe", pe) # what is this for?
 
     def forward(self, x):
         x = x + self.pe[:, : x.size(1)].requires_grad_(
@@ -67,7 +67,6 @@ class MultiHeadAttention(nn.Module):
         assert d_model % num_heads == 0, "d_model must be divisible by num_heads."
         self.num_heads = num_heads
         self.d_model = d_model
-        self.d_k = d_model // num_heads
 
         # The paper assumes d_k=d_v=d_model/num_heads throughout. They take it to be 64
         self.d_k = d_model // num_heads
