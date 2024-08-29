@@ -41,11 +41,11 @@ class PositionalEncoding(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
 
         # compute the positional encodings once in log space?? Why?
-        pe = torch.zeros(max_len, d_model)  # shape: max_len, d_model
+        pe = torch.zeros((max_len, d_model))  # shape: max_len, d_model
         position = torch.arange(0, max_len).unsqueeze(1)  # shape: max_len, 1
         denominator = torch.exp(
             torch.arange(0, d_model, 2)
-            * -(math.log(10**4) / d_model)  # shape: d_model/2
+            * -(math.log(10000.0) / d_model)  # shape: d_model/2
         )
         pe[:, 0::2] = torch.sin(position * denominator)
         pe[:, 1::2] = torch.cos(position * denominator)
