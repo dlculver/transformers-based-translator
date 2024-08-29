@@ -119,9 +119,19 @@ def test_encoder_layer(batch_size, seq_length, num_heads, d_ff, d_model, dropout
 
     assert my_output.shape == torch_output.shape, "Encoder Layer shape doesn't match PyTorch's implementation."
 
-def test_decoder_layer():
+@pytest.mark.parametrize("batch_size, seq_length, num_heads, d_model, d_ff, dropout", list(itertools.product(BATCH_SIZES, SEQ_LENGTHS, NUM_HEADS, EMB_SIZES, D_FFS, DROPOUTS)))
+def test_decoder_layer(batch_size, seq_length, num_heads, d_model, d_ff, dropout):
 
-    pass
+    tgt = torch.rand(batch_size, seq_length, d_model)
+    enc_output = torch.rand(batch_size, seq_length, d_model)
+
+    my_decoder_layer = DecoderLayer(num_heads=num_heads, d_model=d_model, d_ff=d_ff, dropout=dropout)
+    torch_decoder_layer = nn.TransformerDecoderLayer(d_model=d_model, nhead=num_heads, dim_feedforward=d_ff, dropout=dropout)
+
+    my_output = my_decoder_layer(tgt, enc_output)
+    torch_output = torch_decoder_layer(tgt, enc_output)
+
+
 
 
 
