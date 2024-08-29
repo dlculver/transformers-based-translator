@@ -6,3 +6,4 @@ nltk
 spacy
 datasets
 wandb
+pytest
