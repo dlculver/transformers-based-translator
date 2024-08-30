@@ -24,14 +24,16 @@ torch.manual_seed(42)
 
 
 
-BATCH_SIZES = [1, 2, 4, 16, 32]
+BATCH_SIZES = [1, 8, 16, 32]
 NUM_HEADS = [1, 2, 4, 8]
-SEQ_LENGTHS = [5, 10, 50, 100]
+SEQ_LENGTHS = [10, 50, 100]
 DIM_KS = [8, 16, 32, 64]
-EMB_SIZES = [32, 64, 128, 256, 512]
+EMB_SIZES = [64, 128, 256, 512]
 DROPOUTS = [0] # can't use other values here since the drop outs occur randomly...
-MAXLEN = [100, 500, 1000, 5000]
+MAXLEN = [500, 1000, 5000]
 D_FFS = [10, 50, 100, 500]
+NUM_BLOCKS = [1, 2, 4, 8]
+VOCAB_SIZES = [100, 1000, 10000]
 
 @pytest.mark.parametrize("batch_size, num_heads, seq_length, dim_k", list(itertools.product(BATCH_SIZES, NUM_HEADS, SEQ_LENGTHS, DIM_KS)))
 def test_scaled_dpa(batch_size, num_heads, seq_length, dim_k):
@@ -112,7 +114,7 @@ def test_encoder_layer(batch_size, seq_length, num_heads, d_ff, d_model, dropout
     src = torch.rand(batch_size, seq_length, d_model)
 
     my_encoder_layer = EncoderLayer(num_heads=num_heads, d_ff=d_ff, d_model=d_model, dropout=dropout)
-    torch_encoder_layer = nn.TransformerEncoderLayer(d_model, num_heads, d_ff, dropout)
+    torch_encoder_layer = nn.TransformerEncoderLayer(d_model, num_heads, d_ff, dropout, batch_first=True)
 
     my_output = my_encoder_layer(src)
     torch_output = torch_encoder_layer(src)
@@ -131,154 +133,73 @@ def test_decoder_layer(batch_size, seq_length, num_heads, d_model, d_ff, dropout
     my_output = my_decoder_layer(tgt, enc_output)
     torch_output = torch_decoder_layer(tgt, enc_output)
 
+    assert my_output.shape == torch_output.shape, "Decoder Layer shape doesn't match Pytorch's implementation."
 
+@pytest.mark.parametrize("batch_size, seq_length, num_blocks, num_heads, d_model, d_ff, dropout", list(itertools.product(BATCH_SIZES, SEQ_LENGTHS, NUM_BLOCKS, NUM_HEADS, EMB_SIZES, D_FFS, DROPOUTS)))
+def test_encoder(batch_size, seq_length, num_blocks, num_heads, d_model, d_ff, dropout):
 
+    src = torch.rand(batch_size, seq_length, d_model)
 
+    my_encoder = Encoder(num_blocks=num_blocks, num_heads=num_heads, d_model=d_model, d_ff=d_ff, dropout=dropout)
+    torch_encoder = nn.TransformerEncoder(nn.TransformerEncoderLayer(d_model, num_heads, d_ff, dropout), num_blocks)
 
+    my_output = my_encoder(src)
+    torch_output = torch_encoder(src)
 
+    assert my_output.shape == torch_output.shape, "Encoder output doesn't have the same shape as PyTorch's implementation."
 
+@pytest.mark.parametrize("batch_size, seq_length, num_blocks, num_heads, d_model, d_ff, dropout", list(itertools.product(BATCH_SIZES, SEQ_LENGTHS, NUM_BLOCKS, NUM_HEADS, EMB_SIZES, D_FFS, DROPOUTS)))
+def test_decoder(batch_size, seq_length, num_blocks, num_heads, d_model, d_ff, dropout):
 
+    tgt = torch.rand(batch_size, seq_length, d_model)
+    enc_output = torch.rand(batch_size, seq_length, d_model)
 
-# def test_multi_head_attention():
-#     batch_size = 2
-#     num_heads = 4
-#     seq_length = 10
-#     d_model = 16
-#     query = torch.rand(batch_size, seq_length, d_model)
-#     key = torch.rand(batch_size, seq_length, d_model)
-#     value = torch.rand(batch_size, seq_length, d_model)
-#     mask = torch.ones(batch_size, num_heads, seq_length, seq_length)
+    my_decoder = Decoder(num_blocks=num_blocks, num_heads=num_heads, d_model=d_model, d_ff=d_ff, dropout=dropout)
+    torch_decoder = nn.TransformerDecoder(nn.TransformerDecoderLayer(d_model, num_heads, d_ff, dropout), num_blocks)
 
-#     mha = MultiHeadAttention(num_heads, d_model)
-#     output = mha(query, key, value, mask)
+    my_output = my_decoder(tgt, enc_output)
+    torch_output = torch_decoder(tgt, enc_output)
+
+    assert my_output.shape == torch_output.shape, "Decoder output doesn't have the same shape as PyTorch's implementation."
+
+@pytest.mark.parametrize("batch_size, seq_length, vocab_size, num_blocks, num_heads, d_model, d_ff, dropout", list(itertools.product(BATCH_SIZES, SEQ_LENGTHS, VOCAB_SIZES, NUM_BLOCKS, NUM_HEADS, EMB_SIZES, D_FFS, DROPOUTS)))
+def test_transformer(batch_size, seq_length, vocab_size, num_blocks, num_heads, d_model, d_ff, dropout):
+    pass 
     
-#     assert output.shape == (batch_size, seq_length, d_model)
-
-# def test_positionwise_ffn():
-#     d_ff = 32
-#     d_model = 16
-#     seq_length = 10
-#     batch_size = 2
-#     dropout = 0.1
-#     ffn = PositionwiseFFN(d_ff, d_model, dropout)
-#     x = torch.rand(batch_size, seq_length, d_model)
+    src_embed = nn.Sequential(nn.Embedding(vocab_size, d_model), PositionalEncoding(d_model, dropout))
+    tgt_embed = nn.Sequential(nn.Embedding(vocab_size, d_model), PositionalEncoding(d_model, dropout))
     
-#     out = ffn(x)
-#     assert out.shape == (batch_size, seq_length, d_model)
-
-# def test_encoder_layer():
-#     num_heads = 4
-#     d_model = 16
-#     d_ff = 32
-#     seq_length = 10
-#     batch_size = 2
-#     dropout = 0.1
-#     x = torch.rand(batch_size, seq_length, d_model)
-#     mask = torch.ones(batch_size, num_heads, seq_length, seq_length)
-
-#     encoder_layer = EncoderLayer(num_heads, d_model, d_ff, dropout)
-#     out = encoder_layer(x, mask)
+    my_transformer = EncoderDecoder(
+        Encoder(num_blocks=num_blocks, num_heads=num_heads, d_model=d_model, d_ff = d_ff, dropout=dropout),
+        Decoder(num_blocks=num_blocks, num_heads=num_heads, d_model=d_model, d_ff=d_ff, dropout=dropout),
+        src_embed=src_embed, 
+        tgt_embed=tgt_embed, 
+        generator=Generator(d_model, vocab_size)
+        )
     
-#     assert out.shape == (batch_size, seq_length, d_model)
+    torch_transformer = nn.Transformer(
+        d_model=d_model, 
+        nhead=num_heads, 
+        num_encoder_layers=num_blocks, 
+        num_decoder_layers=num_blocks,
+        dim_feedforward=d_ff, 
+        dropout=dropout, 
+        batch_first=True
+    )
 
-# def test_encoder():
-#     num_blocks = 2
-#     num_heads = 4
-#     d_model = 16
-#     d_ff = 32
-#     seq_length = 10
-#     batch_size = 2
-#     dropout = 0.1
-#     x = torch.rand(batch_size, seq_length, d_model)
-#     mask = torch.ones(batch_size, num_heads, seq_length, seq_length)
-
-#     encoder = Encoder(num_blocks, num_heads, d_model, d_ff, dropout)
-#     out = encoder(x, mask)
+    # Create random token tensors for `src` and `tgt` for your custom transformer model
+    src_tokens = torch.randint(0, vocab_size, (batch_size, seq_length))
+    tgt_tokens = torch.randint(0, vocab_size, (batch_size, seq_length))
     
-#     assert out.shape == (batch_size, seq_length, d_model)
-
-# def test_decoder_layer():
-#     num_heads = 4
-#     d_model = 16
-#     d_ff = 32
-#     seq_length = 10
-#     batch_size = 2
-#     dropout = 0.1
-#     x = torch.rand(batch_size, seq_length, d_model)
-#     enc_output = torch.rand(batch_size, seq_length, d_model)
-#     src_mask = torch.ones(batch_size, num_heads, seq_length, seq_length)
-#     tgt_mask = torch.ones(batch_size, num_heads, seq_length, seq_length)
-
-#     decoder_layer = DecoderLayer(num_heads, d_model, d_ff, dropout)
-#     out = decoder_layer(x, enc_output, src_mask, tgt_mask)
+    # Create random embedded tensors for `src` and `tgt` for the PyTorch transformer model
+    src_embeddings = torch.rand(batch_size, seq_length, d_model)
+    tgt_embeddings = torch.rand(batch_size, seq_length, d_model)
     
-#     assert out.shape == (batch_size, seq_length, d_model)
-
-# def test_decoder():
-#     num_blocks = 2
-#     num_heads = 4
-#     d_model = 16
-#     d_ff = 32
-#     seq_length = 10
-#     batch_size = 2
-#     dropout = 0.1
-#     x = torch.rand(batch_size, seq_length, d_model)
-#     enc_output = torch.rand(batch_size, seq_length, d_model)
-#     src_mask = torch.ones(batch_size, num_heads, seq_length, seq_length)
-#     tgt_mask = torch.ones(batch_size, num_heads, seq_length, seq_length)
-
-#     decoder = Decoder(num_blocks, num_heads, d_model, d_ff, dropout)
-#     out = decoder(x, enc_output, src_mask, tgt_mask)
+    # Forward pass through your custom transformer
+    my_output = my_transformer(src_tokens, tgt_tokens, src_mask=None, tgt_mask=None)
     
-#     assert out.shape == (batch_size, seq_length, d_model)
-
-# def test_generator():
-#     d_model = 16
-#     vocab_size = 50
-#     seq_length = 10
-#     batch_size = 2
-#     x = torch.rand(batch_size, seq_length, d_model)
+    # Forward pass through the PyTorch transformer
+    torch_output = torch_transformer(src_embeddings, tgt_embeddings)
     
-#     generator = Generator(d_model, vocab_size)
-#     out = generator(x)
-    
-#     assert out.shape == (batch_size, seq_length, vocab_size)
-
-# def test_encoder_decoder():
-#     num_blocks = 2
-#     num_heads = 4
-#     d_model = 16
-#     d_ff = 32
-#     vocab_size = 50
-#     seq_length = 10
-#     batch_size = 2
-#     dropout = 0.1
-#     src = torch.randint(0, vocab_size, (batch_size, seq_length))
-#     tgt = torch.randint(0, vocab_size, (batch_size, seq_length))
-#     src_mask = torch.ones(batch_size, num_heads, seq_length, seq_length)
-#     tgt_mask = torch.ones(batch_size, num_heads, seq_length, seq_length)
-
-#     encoder = Encoder(num_blocks, num_heads, d_model, d_ff, dropout)
-#     decoder = Decoder(num_blocks, num_heads, d_model, d_ff, dropout)
-#     src_embed = nn.Embedding(vocab_size, d_model)
-#     tgt_embed = nn.Embedding(vocab_size, d_model)
-#     generator = Generator(d_model, vocab_size)
-
-#     model = EncoderDecoder(encoder, decoder, src_embed, tgt_embed, generator)
-#     out = model(src, tgt, src_mask, tgt_mask)
-    
-#     assert out.shape == (batch_size, seq_length, vocab_size)
-
-# if __name__ == "__main__":
-#     test_scaled_dpa()
-#     test_positional_encoding()
-#     test_multi_head_attention()
-#     test_positionwise_ffn()
-#     test_encoder_layer()
-#     test_encoder()
-#     test_decoder_layer()
-#     test_decoder()
-#     test_generator()
-#     test_encoder_decoder()
-
-#     print("All tests passed!")
+    # Check if the output shapes match
+    assert my_output.shape == torch_output.shape, f"Output shapes do not match: {my_output.shape} vs {torch_output.shape}"

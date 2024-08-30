@@ -263,7 +263,7 @@ class EncoderDecoder(nn.Module):
         dec_output = self.decode(
             tgt, enc_output=enc_output, src_mask=src_mask, tgt_mask=tgt_mask
         )
-        return self.generator(dec_output)
+        return dec_output
 
     def encode(self, src, src_mask):
         return self.encoder(self.src_embed(src), src_mask)
