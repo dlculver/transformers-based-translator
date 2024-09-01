@@ -50,6 +50,7 @@ def test_scaled_dpa(batch_size, num_heads, seq_length, dim_k):
     torch_output = F.scaled_dot_product_attention(query, key, value, mask)
 
     assert torch.allclose(output, torch_output, atol=1e-6), "Output does not match PyTorch's implementation"
+    assert output.dtype == torch_output.dtype, "Dtypes do not match!"
 
 
 # the following implementation of positional encodings was taken from https://pytorch.org/tutorials/beginner/translation_transformer.html#seq2seq-network-using-transformer
@@ -86,6 +87,7 @@ def test_positional_encodings(batch_size, seq_len, emb_size, dropout, maxlen):
     torch_output = torch_pe(token_emb)
 
     assert torch.allclose(my_output, torch_output, atol=1e-6), "Output does not match PyTorch's implementation."
+    assert my_output.dtype == torch_output.dtype, "Dtypes do not match!"
 
 @pytest.mark.parametrize("batch_size, num_heads, seq_length, d_model", list(itertools.product(BATCH_SIZES, NUM_HEADS, SEQ_LENGTHS, EMB_SIZES)))
 def test_multihead_attention(batch_size, num_heads, seq_length, d_model):
@@ -104,6 +106,7 @@ def test_multihead_attention(batch_size, num_heads, seq_length, d_model):
     torch_output, torch_attention_output_weights = torch_mha(query, key, value)
 
     assert my_ouput.shape == torch_output.shape, "MHA output doesn't have the same shape as PyTorch's implementation."
+    assert my_output.dtype == torch_output.dtype, "MHA outputs don't have matching dtypes!"
 
     # couldn't get the reproducibility to work, will look further into this later. 
     # assert torch.allclose(my_ouput, torch_output), "MHA output does not match PyTorch's implementation."
@@ -120,6 +123,7 @@ def test_encoder_layer(batch_size, seq_length, num_heads, d_ff, d_model, dropout
     torch_output = torch_encoder_layer(src)
 
     assert my_output.shape == torch_output.shape, "Encoder Layer shape doesn't match PyTorch's implementation."
+    assert my_output.dtype == torch_output.dtype, "Encoder Layer's output dtype doesn't match PyTorch's implementation."
 
 @pytest.mark.parametrize("batch_size, seq_length, num_heads, d_model, d_ff, dropout", list(itertools.product(BATCH_SIZES, SEQ_LENGTHS, NUM_HEADS, EMB_SIZES, D_FFS, DROPOUTS)))
 def test_decoder_layer(batch_size, seq_length, num_heads, d_model, d_ff, dropout):
@@ -134,6 +138,7 @@ def test_decoder_layer(batch_size, seq_length, num_heads, d_model, d_ff, dropout
     torch_output = torch_decoder_layer(tgt, enc_output)
 
     assert my_output.shape == torch_output.shape, "Decoder Layer shape doesn't match Pytorch's implementation."
+    assert my_output.dtype == torch_output.dtype, "Decoder Layer's output's dtype doesn't match PyTorch's."
 
 @pytest.mark.parametrize("batch_size, seq_length, num_blocks, num_heads, d_model, d_ff, dropout", list(itertools.product(BATCH_SIZES, SEQ_LENGTHS, NUM_BLOCKS, NUM_HEADS, EMB_SIZES, D_FFS, DROPOUTS)))
 def test_encoder(batch_size, seq_length, num_blocks, num_heads, d_model, d_ff, dropout):
@@ -147,6 +152,7 @@ def test_encoder(batch_size, seq_length, num_blocks, num_heads, d_model, d_ff, d
     torch_output = torch_encoder(src)
 
     assert my_output.shape == torch_output.shape, "Encoder output doesn't have the same shape as PyTorch's implementation."
+    assert my_output.dtype == torch_output.dtype, "Encoder output's dtype doesn't match PyTorch's."
 
 @pytest.mark.parametrize("batch_size, seq_length, num_blocks, num_heads, d_model, d_ff, dropout", list(itertools.product(BATCH_SIZES, SEQ_LENGTHS, NUM_BLOCKS, NUM_HEADS, EMB_SIZES, D_FFS, DROPOUTS)))
 def test_decoder(batch_size, seq_length, num_blocks, num_heads, d_model, d_ff, dropout):
@@ -161,6 +167,7 @@ def test_decoder(batch_size, seq_length, num_blocks, num_heads, d_model, d_ff, d
     torch_output = torch_decoder(tgt, enc_output)
 
     assert my_output.shape == torch_output.shape, "Decoder output doesn't have the same shape as PyTorch's implementation."
+    assert my_output.dtype == torch_output.dtype, "Decoder's output's dtype doesn't match PyTorch's."
 
 @pytest.mark.parametrize("batch_size, seq_length, vocab_size, num_blocks, num_heads, d_model, d_ff, dropout", list(itertools.product(BATCH_SIZES, SEQ_LENGTHS, VOCAB_SIZES, NUM_BLOCKS, NUM_HEADS, EMB_SIZES, D_FFS, DROPOUTS)))
 def test_transformer(batch_size, seq_length, vocab_size, num_blocks, num_heads, d_model, d_ff, dropout):
@@ -203,3 +210,4 @@ def test_transformer(batch_size, seq_length, vocab_size, num_blocks, num_heads, 
     
     # Check if the output shapes match
     assert my_output.shape == torch_output.shape, f"Output shapes do not match: {my_output.shape} vs {torch_output.shape}"
+    assert my_output.dtype == torch_output.dtype, f"Transformer output dtypes do not match: {my_output.dtype} vs {torch_output.dtype}"
