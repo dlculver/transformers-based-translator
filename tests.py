@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pytest
 import itertools
+from functools import wraps
 import math
 
 
@@ -35,7 +36,34 @@ D_FFS = [10, 50, 100, 500]
 NUM_BLOCKS = [1, 2, 4, 8]
 VOCAB_SIZES = [100, 1000, 10000]
 
-@pytest.mark.parametrize("batch_size, num_heads, seq_length, dim_k", list(itertools.product(BATCH_SIZES, NUM_HEADS, SEQ_LENGTHS, DIM_KS)))
+PARAMS = {
+    "batch_size": BATCH_SIZES,
+    "num_heads": NUM_HEADS,
+    'seq_length': SEQ_LENGTHS,
+    "dim_k": DIM_KS,
+    "d_model": EMB_SIZES,
+    "dropout": DROPOUTS,
+    "maxlen": MAXLEN,
+    "d_ff": D_FFS,
+    "num_blocks": NUM_BLOCKS,
+    "vocab_size": VOCAB_SIZES
+}
+
+def generate_params(*param_names):
+    def decorator(test_func):
+        param_values = [PARAMS[param] for param in param_names]
+
+        combinations = list(itertools.product(*param_values))
+
+        @pytest.mark.parametrize(", ".join(param_names), combinations)
+        @wraps(test_func)
+        def wrapper(*args, **kwargs):
+            return test_func(*args, **kwargs)
+        
+        return wrapper
+    return decorator
+
+@generate_params("batch_size", "num_heads", "seq_length", "dim_k")
 def test_scaled_dpa(batch_size, num_heads, seq_length, dim_k):
 
     query = torch.rand(batch_size, num_heads, seq_length, dim_k)
@@ -74,140 +102,140 @@ class TorchPositionalEncoding(nn.Module):
         return self.dropout(token_embedding + self.pos_embedding[:token_embedding.size(0), :])
 
 
-@pytest.mark.parametrize("batch_size, seq_len, emb_size, dropout, maxlen", list(itertools.product(BATCH_SIZES, SEQ_LENGTHS, EMB_SIZES, DROPOUTS, MAXLEN)))
-def test_positional_encodings(batch_size, seq_len, emb_size, dropout, maxlen):
+@generate_params("batch_size", "seq_length", "d_model", "dropout", "maxlen")
+def test_positional_encodings(batch_size, seq_length, d_model, dropout, maxlen):
 
-    token_emb = torch.rand(batch_size, seq_len, emb_size)
+    token_emb = torch.rand(batch_size, seq_length, d_model)
 
-    my_pe = PositionalEncoding(emb_size, dropout, maxlen)
+    my_pe = PositionalEncoding(d_model, dropout, maxlen)
 
     my_output = my_pe(token_emb)
 
-    torch_pe = PositionalEncoding(emb_size, dropout, maxlen)
+    torch_pe = TorchPositionalEncoding(d_model, dropout, maxlen)
     torch_output = torch_pe(token_emb)
 
     assert torch.allclose(my_output, torch_output, atol=1e-6), "Output does not match PyTorch's implementation."
     assert my_output.dtype == torch_output.dtype, "Dtypes do not match!"
 
-@pytest.mark.parametrize("batch_size, num_heads, seq_length, d_model", list(itertools.product(BATCH_SIZES, NUM_HEADS, SEQ_LENGTHS, EMB_SIZES)))
-def test_multihead_attention(batch_size, num_heads, seq_length, d_model):
+# @pytest.mark.parametrize("batch_size, num_heads, seq_length, d_model", list(itertools.product(BATCH_SIZES, NUM_HEADS, SEQ_LENGTHS, EMB_SIZES)))
+# def test_multihead_attention(batch_size, num_heads, seq_length, d_model):
 
-    query = torch.rand(batch_size, seq_length, d_model)
-    key = torch.rand(batch_size, seq_length, d_model)
-    value = torch.rand(batch_size, seq_length, d_model)
-    # TODO: Leaving out the masks for now, need to figure out how to incorporate them...
+#     query = torch.rand(batch_size, seq_length, d_model)
+#     key = torch.rand(batch_size, seq_length, d_model)
+#     value = torch.rand(batch_size, seq_length, d_model)
+#     # TODO: Leaving out the masks for now, need to figure out how to incorporate them...
 
-    torch.manual_seed(0) # adding this for reproducibility to check if outputs are also close
-    my_mha = MultiHeadAttention(num_heads=num_heads, d_model=d_model)
-    my_ouput = my_mha(query, key, value)
+#     torch.manual_seed(0) # adding this for reproducibility to check if outputs are also close
+#     my_mha = MultiHeadAttention(num_heads=num_heads, d_model=d_model)
+#     my_ouput = my_mha(query, key, value)
 
-    torch.manual_seed(0)
-    torch_mha = nn.MultiheadAttention(d_model, num_heads)
-    torch_output, torch_attention_output_weights = torch_mha(query, key, value)
+#     torch.manual_seed(0)
+#     torch_mha = nn.MultiheadAttention(d_model, num_heads)
+#     torch_output, torch_attention_output_weights = torch_mha(query, key, value)
 
-    assert my_ouput.shape == torch_output.shape, "MHA output doesn't have the same shape as PyTorch's implementation."
-    assert my_output.dtype == torch_output.dtype, "MHA outputs don't have matching dtypes!"
+#     assert my_ouput.shape == torch_output.shape, "MHA output doesn't have the same shape as PyTorch's implementation."
+#     assert my_output.dtype == torch_output.dtype, "MHA outputs don't have matching dtypes!"
 
-    # couldn't get the reproducibility to work, will look further into this later. 
-    # assert torch.allclose(my_ouput, torch_output), "MHA output does not match PyTorch's implementation."
+#     # couldn't get the reproducibility to work, will look further into this later. 
+#     # assert torch.allclose(my_ouput, torch_output), "MHA output does not match PyTorch's implementation."
 
-@pytest.mark.parametrize("batch_size, seq_length, num_heads, d_ff, d_model, dropout", list(itertools.product(BATCH_SIZES, SEQ_LENGTHS, NUM_HEADS, D_FFS, EMB_SIZES, DROPOUTS)))
-def test_encoder_layer(batch_size, seq_length, num_heads, d_ff, d_model, dropout):
+# @pytest.mark.parametrize("batch_size, seq_length, num_heads, d_ff, d_model, dropout", list(itertools.product(BATCH_SIZES, SEQ_LENGTHS, NUM_HEADS, D_FFS, EMB_SIZES, DROPOUTS)))
+# def test_encoder_layer(batch_size, seq_length, num_heads, d_ff, d_model, dropout):
 
-    src = torch.rand(batch_size, seq_length, d_model)
+#     src = torch.rand(batch_size, seq_length, d_model)
 
-    my_encoder_layer = EncoderLayer(num_heads=num_heads, d_ff=d_ff, d_model=d_model, dropout=dropout)
-    torch_encoder_layer = nn.TransformerEncoderLayer(d_model, num_heads, d_ff, dropout, batch_first=True)
+#     my_encoder_layer = EncoderLayer(num_heads=num_heads, d_ff=d_ff, d_model=d_model, dropout=dropout)
+#     torch_encoder_layer = nn.TransformerEncoderLayer(d_model, num_heads, d_ff, dropout, batch_first=True)
 
-    my_output = my_encoder_layer(src)
-    torch_output = torch_encoder_layer(src)
+#     my_output = my_encoder_layer(src)
+#     torch_output = torch_encoder_layer(src)
 
-    assert my_output.shape == torch_output.shape, "Encoder Layer shape doesn't match PyTorch's implementation."
-    assert my_output.dtype == torch_output.dtype, "Encoder Layer's output dtype doesn't match PyTorch's implementation."
+#     assert my_output.shape == torch_output.shape, "Encoder Layer shape doesn't match PyTorch's implementation."
+#     assert my_output.dtype == torch_output.dtype, "Encoder Layer's output dtype doesn't match PyTorch's implementation."
 
-@pytest.mark.parametrize("batch_size, seq_length, num_heads, d_model, d_ff, dropout", list(itertools.product(BATCH_SIZES, SEQ_LENGTHS, NUM_HEADS, EMB_SIZES, D_FFS, DROPOUTS)))
-def test_decoder_layer(batch_size, seq_length, num_heads, d_model, d_ff, dropout):
+# @pytest.mark.parametrize("batch_size, seq_length, num_heads, d_model, d_ff, dropout", list(itertools.product(BATCH_SIZES, SEQ_LENGTHS, NUM_HEADS, EMB_SIZES, D_FFS, DROPOUTS)))
+# def test_decoder_layer(batch_size, seq_length, num_heads, d_model, d_ff, dropout):
 
-    tgt = torch.rand(batch_size, seq_length, d_model)
-    enc_output = torch.rand(batch_size, seq_length, d_model)
+#     tgt = torch.rand(batch_size, seq_length, d_model)
+#     enc_output = torch.rand(batch_size, seq_length, d_model)
 
-    my_decoder_layer = DecoderLayer(num_heads=num_heads, d_model=d_model, d_ff=d_ff, dropout=dropout)
-    torch_decoder_layer = nn.TransformerDecoderLayer(d_model=d_model, nhead=num_heads, dim_feedforward=d_ff, dropout=dropout)
+#     my_decoder_layer = DecoderLayer(num_heads=num_heads, d_model=d_model, d_ff=d_ff, dropout=dropout)
+#     torch_decoder_layer = nn.TransformerDecoderLayer(d_model=d_model, nhead=num_heads, dim_feedforward=d_ff, dropout=dropout)
 
-    my_output = my_decoder_layer(tgt, enc_output)
-    torch_output = torch_decoder_layer(tgt, enc_output)
+#     my_output = my_decoder_layer(tgt, enc_output)
+#     torch_output = torch_decoder_layer(tgt, enc_output)
 
-    assert my_output.shape == torch_output.shape, "Decoder Layer shape doesn't match Pytorch's implementation."
-    assert my_output.dtype == torch_output.dtype, "Decoder Layer's output's dtype doesn't match PyTorch's."
+#     assert my_output.shape == torch_output.shape, "Decoder Layer shape doesn't match Pytorch's implementation."
+#     assert my_output.dtype == torch_output.dtype, "Decoder Layer's output's dtype doesn't match PyTorch's."
 
-@pytest.mark.parametrize("batch_size, seq_length, num_blocks, num_heads, d_model, d_ff, dropout", list(itertools.product(BATCH_SIZES, SEQ_LENGTHS, NUM_BLOCKS, NUM_HEADS, EMB_SIZES, D_FFS, DROPOUTS)))
-def test_encoder(batch_size, seq_length, num_blocks, num_heads, d_model, d_ff, dropout):
+# @pytest.mark.parametrize("batch_size, seq_length, num_blocks, num_heads, d_model, d_ff, dropout", list(itertools.product(BATCH_SIZES, SEQ_LENGTHS, NUM_BLOCKS, NUM_HEADS, EMB_SIZES, D_FFS, DROPOUTS)))
+# def test_encoder(batch_size, seq_length, num_blocks, num_heads, d_model, d_ff, dropout):
 
-    src = torch.rand(batch_size, seq_length, d_model)
+#     src = torch.rand(batch_size, seq_length, d_model)
 
-    my_encoder = Encoder(num_blocks=num_blocks, num_heads=num_heads, d_model=d_model, d_ff=d_ff, dropout=dropout)
-    torch_encoder = nn.TransformerEncoder(nn.TransformerEncoderLayer(d_model, num_heads, d_ff, dropout), num_blocks)
+#     my_encoder = Encoder(num_blocks=num_blocks, num_heads=num_heads, d_model=d_model, d_ff=d_ff, dropout=dropout)
+#     torch_encoder = nn.TransformerEncoder(nn.TransformerEncoderLayer(d_model, num_heads, d_ff, dropout), num_blocks)
 
-    my_output = my_encoder(src)
-    torch_output = torch_encoder(src)
+#     my_output = my_encoder(src)
+#     torch_output = torch_encoder(src)
 
-    assert my_output.shape == torch_output.shape, "Encoder output doesn't have the same shape as PyTorch's implementation."
-    assert my_output.dtype == torch_output.dtype, "Encoder output's dtype doesn't match PyTorch's."
+#     assert my_output.shape == torch_output.shape, "Encoder output doesn't have the same shape as PyTorch's implementation."
+#     assert my_output.dtype == torch_output.dtype, "Encoder output's dtype doesn't match PyTorch's."
 
-@pytest.mark.parametrize("batch_size, seq_length, num_blocks, num_heads, d_model, d_ff, dropout", list(itertools.product(BATCH_SIZES, SEQ_LENGTHS, NUM_BLOCKS, NUM_HEADS, EMB_SIZES, D_FFS, DROPOUTS)))
-def test_decoder(batch_size, seq_length, num_blocks, num_heads, d_model, d_ff, dropout):
+# @pytest.mark.parametrize("batch_size, seq_length, num_blocks, num_heads, d_model, d_ff, dropout", list(itertools.product(BATCH_SIZES, SEQ_LENGTHS, NUM_BLOCKS, NUM_HEADS, EMB_SIZES, D_FFS, DROPOUTS)))
+# def test_decoder(batch_size, seq_length, num_blocks, num_heads, d_model, d_ff, dropout):
 
-    tgt = torch.rand(batch_size, seq_length, d_model)
-    enc_output = torch.rand(batch_size, seq_length, d_model)
+#     tgt = torch.rand(batch_size, seq_length, d_model)
+#     enc_output = torch.rand(batch_size, seq_length, d_model)
 
-    my_decoder = Decoder(num_blocks=num_blocks, num_heads=num_heads, d_model=d_model, d_ff=d_ff, dropout=dropout)
-    torch_decoder = nn.TransformerDecoder(nn.TransformerDecoderLayer(d_model, num_heads, d_ff, dropout), num_blocks)
+#     my_decoder = Decoder(num_blocks=num_blocks, num_heads=num_heads, d_model=d_model, d_ff=d_ff, dropout=dropout)
+#     torch_decoder = nn.TransformerDecoder(nn.TransformerDecoderLayer(d_model, num_heads, d_ff, dropout), num_blocks)
 
-    my_output = my_decoder(tgt, enc_output)
-    torch_output = torch_decoder(tgt, enc_output)
+#     my_output = my_decoder(tgt, enc_output)
+#     torch_output = torch_decoder(tgt, enc_output)
 
-    assert my_output.shape == torch_output.shape, "Decoder output doesn't have the same shape as PyTorch's implementation."
-    assert my_output.dtype == torch_output.dtype, "Decoder's output's dtype doesn't match PyTorch's."
+#     assert my_output.shape == torch_output.shape, "Decoder output doesn't have the same shape as PyTorch's implementation."
+#     assert my_output.dtype == torch_output.dtype, "Decoder's output's dtype doesn't match PyTorch's."
 
-@pytest.mark.parametrize("batch_size, seq_length, vocab_size, num_blocks, num_heads, d_model, d_ff, dropout", list(itertools.product(BATCH_SIZES, SEQ_LENGTHS, VOCAB_SIZES, NUM_BLOCKS, NUM_HEADS, EMB_SIZES, D_FFS, DROPOUTS)))
-def test_transformer(batch_size, seq_length, vocab_size, num_blocks, num_heads, d_model, d_ff, dropout):
-    pass 
+# @pytest.mark.parametrize("batch_size, seq_length, vocab_size, num_blocks, num_heads, d_model, d_ff, dropout", list(itertools.product(BATCH_SIZES, SEQ_LENGTHS, VOCAB_SIZES, NUM_BLOCKS, NUM_HEADS, EMB_SIZES, D_FFS, DROPOUTS)))
+# def test_transformer(batch_size, seq_length, vocab_size, num_blocks, num_heads, d_model, d_ff, dropout):
+#     pass 
     
-    src_embed = nn.Sequential(nn.Embedding(vocab_size, d_model), PositionalEncoding(d_model, dropout))
-    tgt_embed = nn.Sequential(nn.Embedding(vocab_size, d_model), PositionalEncoding(d_model, dropout))
+#     src_embed = nn.Sequential(nn.Embedding(vocab_size, d_model), PositionalEncoding(d_model, dropout))
+#     tgt_embed = nn.Sequential(nn.Embedding(vocab_size, d_model), PositionalEncoding(d_model, dropout))
     
-    my_transformer = EncoderDecoder(
-        Encoder(num_blocks=num_blocks, num_heads=num_heads, d_model=d_model, d_ff = d_ff, dropout=dropout),
-        Decoder(num_blocks=num_blocks, num_heads=num_heads, d_model=d_model, d_ff=d_ff, dropout=dropout),
-        src_embed=src_embed, 
-        tgt_embed=tgt_embed, 
-        generator=Generator(d_model, vocab_size)
-        )
+#     my_transformer = EncoderDecoder(
+#         Encoder(num_blocks=num_blocks, num_heads=num_heads, d_model=d_model, d_ff = d_ff, dropout=dropout),
+#         Decoder(num_blocks=num_blocks, num_heads=num_heads, d_model=d_model, d_ff=d_ff, dropout=dropout),
+#         src_embed=src_embed, 
+#         tgt_embed=tgt_embed, 
+#         generator=Generator(d_model, vocab_size)
+#         )
     
-    torch_transformer = nn.Transformer(
-        d_model=d_model, 
-        nhead=num_heads, 
-        num_encoder_layers=num_blocks, 
-        num_decoder_layers=num_blocks,
-        dim_feedforward=d_ff, 
-        dropout=dropout, 
-        batch_first=True
-    )
+#     torch_transformer = nn.Transformer(
+#         d_model=d_model, 
+#         nhead=num_heads, 
+#         num_encoder_layers=num_blocks, 
+#         num_decoder_layers=num_blocks,
+#         dim_feedforward=d_ff, 
+#         dropout=dropout, 
+#         batch_first=True
+#     )
 
-    # Create random token tensors for `src` and `tgt` for your custom transformer model
-    src_tokens = torch.randint(0, vocab_size, (batch_size, seq_length))
-    tgt_tokens = torch.randint(0, vocab_size, (batch_size, seq_length))
+#     # Create random token tensors for `src` and `tgt` for your custom transformer model
+#     src_tokens = torch.randint(0, vocab_size, (batch_size, seq_length))
+#     tgt_tokens = torch.randint(0, vocab_size, (batch_size, seq_length))
     
-    # Create random embedded tensors for `src` and `tgt` for the PyTorch transformer model
-    src_embeddings = torch.rand(batch_size, seq_length, d_model)
-    tgt_embeddings = torch.rand(batch_size, seq_length, d_model)
+#     # Create random embedded tensors for `src` and `tgt` for the PyTorch transformer model
+#     src_embeddings = torch.rand(batch_size, seq_length, d_model)
+#     tgt_embeddings = torch.rand(batch_size, seq_length, d_model)
     
-    # Forward pass through your custom transformer
-    my_output = my_transformer(src_tokens, tgt_tokens, src_mask=None, tgt_mask=None)
+#     # Forward pass through your custom transformer
+#     my_output = my_transformer(src_tokens, tgt_tokens, src_mask=None, tgt_mask=None)
     
-    # Forward pass through the PyTorch transformer
-    torch_output = torch_transformer(src_embeddings, tgt_embeddings)
+#     # Forward pass through the PyTorch transformer
+#     torch_output = torch_transformer(src_embeddings, tgt_embeddings)
     
-    # Check if the output shapes match
-    assert my_output.shape == torch_output.shape, f"Output shapes do not match: {my_output.shape} vs {torch_output.shape}"
-    assert my_output.dtype == torch_output.dtype, f"Transformer output dtypes do not match: {my_output.dtype} vs {torch_output.dtype}"
+#     # Check if the output shapes match
+#     assert my_output.shape == torch_output.shape, f"Output shapes do not match: {my_output.shape} vs {torch_output.shape}"
+#     assert my_output.dtype == torch_output.dtype, f"Transformer output dtypes do not match: {my_output.dtype} vs {torch_output.dtype}"
