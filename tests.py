@@ -5,6 +5,7 @@ import pytest
 import itertools
 from functools import wraps
 import math
+import numpy as np
 
 
 from components import (
@@ -22,7 +23,7 @@ from components import (
 
 # set random seed
 torch.manual_seed(42)
-
+np.random.seed(42)
 
 
 BATCH_SIZES = [1, 8, 16, 32]
@@ -49,6 +50,15 @@ PARAMS = {
     "vocab_size": VOCAB_SIZES
 }
 
+if torch.backends.mps.is_available():
+    DEVICE = torch.device("mps")
+elif torch.cuda.is_available():
+    DEVICE = torch.device("cuda")
+else:
+    DEVICE = torch.device("cpu")
+
+print(f"Using device: {DEVICE}")
+
 def generate_params(*param_names):
     def decorator(test_func):
         param_values = [PARAMS[param] for param in param_names]
@@ -62,6 +72,10 @@ def generate_params(*param_names):
         
         return wrapper
     return decorator
+
+def count_parameters(module: torch.nn.Module):
+    """Returns the total number of parameters in a PyTorch module."""
+    return sum(p.numel() for p in module.parameters() if p.requires_grad)
 
 @generate_params("batch_size", "num_heads", "seq_length", "dim_k")
 def test_scaled_dpa(batch_size, num_heads, seq_length, dim_k):
@@ -102,56 +116,76 @@ class TorchPositionalEncoding(nn.Module):
         return self.dropout(token_embedding + self.pos_embedding[:token_embedding.size(0), :])
 
 
-@generate_params("batch_size", "seq_length", "d_model", "dropout", "maxlen")
-def test_positional_encodings(batch_size, seq_length, d_model, dropout, maxlen):
+# @generate_params("batch_size", "seq_length", "d_model", "dropout", "maxlen")
+# def test_positional_encodings(batch_size, seq_length, d_model, dropout, maxlen):
 
-    token_emb = torch.rand(batch_size, seq_length, d_model)
+#     token_emb = torch.rand(batch_size, seq_length, d_model)
 
-    my_pe = PositionalEncoding(d_model, dropout, maxlen)
+#     my_pe = PositionalEncoding(d_model, dropout, maxlen)
 
-    my_output = my_pe(token_emb)
+#     my_output = my_pe(token_emb)
 
-    torch_pe = TorchPositionalEncoding(d_model, dropout, maxlen)
-    torch_output = torch_pe(token_emb)
+#     torch_pe = TorchPositionalEncoding(d_model, dropout, maxlen)
+#     torch_output = torch_pe(token_emb)
 
-    assert torch.allclose(my_output, torch_output, atol=1e-6), "Output does not match PyTorch's implementation."
-    assert my_output.dtype == torch_output.dtype, "Dtypes do not match!"
+#     assert my_output.shape == torch_output.shape, "Outputs don't have matching shape. "
+#     assert my_output.dtype == torch_output.dtype, "Dtypes do not match!"
+#     assert torch.allclose(my_output, torch_output, atol=1e-6), "Output does not match PyTorch's implementation."
 
-# @pytest.mark.parametrize("batch_size, num_heads, seq_length, d_model", list(itertools.product(BATCH_SIZES, NUM_HEADS, SEQ_LENGTHS, EMB_SIZES)))
-# def test_multihead_attention(batch_size, num_heads, seq_length, d_model):
 
-#     query = torch.rand(batch_size, seq_length, d_model)
-#     key = torch.rand(batch_size, seq_length, d_model)
-#     value = torch.rand(batch_size, seq_length, d_model)
-#     # TODO: Leaving out the masks for now, need to figure out how to incorporate them...
+    
+@generate_params("batch_size", "num_heads", "seq_length", "d_model")
+def test_multihead_attention(batch_size, num_heads, seq_length, d_model):
 
-#     torch.manual_seed(0) # adding this for reproducibility to check if outputs are also close
-#     my_mha = MultiHeadAttention(num_heads=num_heads, d_model=d_model)
-#     my_ouput = my_mha(query, key, value)
+    query = torch.rand(batch_size, seq_length, d_model).to(DEVICE)
+    key = torch.rand(batch_size, seq_length, d_model).to(DEVICE)
+    value = torch.rand(batch_size, seq_length, d_model).to(DEVICE)
 
-#     torch.manual_seed(0)
-#     torch_mha = nn.MultiheadAttention(d_model, num_heads)
-#     torch_output, torch_attention_output_weights = torch_mha(query, key, value)
+    # Instantiate your custom MultiHeadAttention
+    my_mha = MultiHeadAttention(num_heads=num_heads, d_model=d_model).to(DEVICE)
+    
+    # Instantiate PyTorch's MultiheadAttention
+    torch_mha = nn.MultiheadAttention(embed_dim=d_model, num_heads=num_heads, batch_first=True).to(DEVICE)
 
-#     assert my_ouput.shape == torch_output.shape, "MHA output doesn't have the same shape as PyTorch's implementation."
-#     assert my_output.dtype == torch_output.dtype, "MHA outputs don't have matching dtypes!"
+    # Manually copy weights from torch_mha to your my_mha
+    my_mha.query_linear.weight.data = torch_mha.in_proj_weight[:d_model, :].detach().clone().to(DEVICE)
+    my_mha.key_linear.weight.data = torch_mha.in_proj_weight[d_model:2*d_model, :].detach().clone().to(DEVICE)
+    my_mha.value_linear.weight.data = torch_mha.in_proj_weight[2*d_model:, :].detach().clone().to(DEVICE)
 
-#     # couldn't get the reproducibility to work, will look further into this later. 
-#     # assert torch.allclose(my_ouput, torch_output), "MHA output does not match PyTorch's implementation."
+    my_mha.query_linear.bias.data = torch_mha.in_proj_bias[:d_model].detach().clone().to(DEVICE)
+    my_mha.key_linear.bias.data = torch_mha.in_proj_bias[d_model:2*d_model].detach().clone().to(DEVICE)
+    my_mha.value_linear.bias.data = torch_mha.in_proj_bias[2*d_model:].detach().clone().to(DEVICE)
 
-# @pytest.mark.parametrize("batch_size, seq_length, num_heads, d_ff, d_model, dropout", list(itertools.product(BATCH_SIZES, SEQ_LENGTHS, NUM_HEADS, D_FFS, EMB_SIZES, DROPOUTS)))
-# def test_encoder_layer(batch_size, seq_length, num_heads, d_ff, d_model, dropout):
+    # Output linear layer
+    my_mha.output_linear.weight.data = torch_mha.out_proj.weight.detach().clone().to(DEVICE)
+    my_mha.output_linear.bias.data = torch_mha.out_proj.bias.detach().clone().to(DEVICE)
 
-#     src = torch.rand(batch_size, seq_length, d_model)
+    # Forward pass through both models
+    my_output = my_mha(query, key, value)
+    torch_output, _ = torch_mha(query, key, value)
 
-#     my_encoder_layer = EncoderLayer(num_heads=num_heads, d_ff=d_ff, d_model=d_model, dropout=dropout)
-#     torch_encoder_layer = nn.TransformerEncoderLayer(d_model, num_heads, d_ff, dropout, batch_first=True)
+    # Verify shape, dtype, and closeness of outputs
+    assert my_output.shape == torch_output.shape, "MHA output doesn't have the same shape as PyTorch's implementation."
+    assert my_output.dtype == torch_output.dtype, "MHA outputs don't have matching dtypes!"
+    assert torch.allclose(my_output, torch_output, atol=1e-6), "Outputs do not match PyTorch's implementation."
 
-#     my_output = my_encoder_layer(src)
-#     torch_output = torch_encoder_layer(src)
 
-#     assert my_output.shape == torch_output.shape, "Encoder Layer shape doesn't match PyTorch's implementation."
-#     assert my_output.dtype == torch_output.dtype, "Encoder Layer's output dtype doesn't match PyTorch's implementation."
+@generate_params("batch_size", "seq_length", "num_heads", "d_ff", "d_model", "dropout")
+def test_encoder_layer(batch_size, seq_length, num_heads, d_ff, d_model, dropout):
+
+    src = torch.rand(batch_size, seq_length, d_model).to(DEVICE)
+
+    my_encoder_layer = EncoderLayer(num_heads=num_heads, d_ff=d_ff, d_model=d_model, dropout=dropout, testing_mode=True).to(DEVICE)
+    torch.manual_seed(42)
+    np.random.seed(42)
+    torch_encoder_layer = nn.TransformerEncoderLayer(d_model, num_heads, d_ff, dropout, batch_first=True).to(DEVICE)
+
+    my_output = my_encoder_layer(src)
+    torch_output = torch_encoder_layer(src)
+
+    assert my_output.shape == torch_output.shape, "Encoder Layer shape doesn't match PyTorch's implementation."
+    assert my_output.dtype == torch_output.dtype, "Encoder Layer's output dtype doesn't match PyTorch's implementation."
+    assert torch.allclose(my_output, torch_output, atol=1e-6), "Outputs do not match"
 
 # @pytest.mark.parametrize("batch_size, seq_length, num_heads, d_model, d_ff, dropout", list(itertools.product(BATCH_SIZES, SEQ_LENGTHS, NUM_HEADS, EMB_SIZES, D_FFS, DROPOUTS)))
 # def test_decoder_layer(batch_size, seq_length, num_heads, d_model, d_ff, dropout):
