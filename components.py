@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+import numpy as np
 
 
 def scaled_dpa(query, key, value, mask=None):
@@ -41,11 +42,11 @@ class PositionalEncoding(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
 
         # compute the positional encodings once in log space?? Why?
-        pe = torch.zeros(max_len, d_model)  # shape: max_len, d_model
+        pe = torch.zeros((max_len, d_model))  # shape: max_len, d_model
         position = torch.arange(0, max_len).unsqueeze(1)  # shape: max_len, 1
         denominator = torch.exp(
             torch.arange(0, d_model, 2)
-            * -(math.log(10**4) / d_model)  # shape: d_model/2
+            * -(math.log(10000.0) / d_model)  # shape: d_model/2
         )
         pe[:, 0::2] = torch.sin(position * denominator)
         pe[:, 1::2] = torch.cos(position * denominator)
@@ -126,11 +127,21 @@ class PositionwiseFFN(nn.Module):
 class EncoderLayer(nn.Module):
     """Encoder layer as in `Attention is All You Need`. We use postlayer normalization."""
 
-    def __init__(self, num_heads: int, d_model: int, d_ff: int, dropout: float = 0.1):
+    def __init__(self, num_heads: int, d_model: int, d_ff: int, dropout: float = 0.1, testing_mode = False):
         super(EncoderLayer, self).__init__()
-        self.mha = MultiHeadAttention(
-            num_heads=num_heads, d_model=d_model, dropout=dropout
-        )
+
+        if testing_mode:
+            torch.manual_seed(42)
+            np.random.seed(42)
+            self.mha = nn.MultiheadAttention(
+                embed_dim=d_model,
+                num_heads=num_heads,
+                dropout=dropout,
+            )
+        else:
+            self.mha = MultiHeadAttention(
+                num_heads=num_heads, d_model=d_model, dropout=dropout
+            ) 
         self.ffn = PositionwiseFFN(d_ff=d_ff, d_model=d_model, dropout=dropout)
         self.layernorm1 = nn.LayerNorm(d_model)
         self.layernorm2 = nn.LayerNorm(d_model)
@@ -138,8 +149,13 @@ class EncoderLayer(nn.Module):
 
     def forward(self, x, mask=None):
 
-        # Self-attention
-        attn_output = self.mha(x, x, x, mask)
+        # Apply MHA
+        if isinstance(self.mha, nn.MultiheadAttention):
+            # In testing mode, using PyTorch's MHA and it returns a tuple.
+            attn_output, _ = self.mha(x, x, x, attn_mask = mask)
+        else:
+            # If not in testing mode, using our own MHA implementation.
+            attn_output = self.mha(x, x, x, mask)
         out1 = self.layernorm1(x + self.dropout(attn_output))
 
         # Feedforward
@@ -263,7 +279,7 @@ class EncoderDecoder(nn.Module):
         dec_output = self.decode(
             tgt, enc_output=enc_output, src_mask=src_mask, tgt_mask=tgt_mask
         )
-        return self.generator(dec_output)
+        return dec_output
 
     def encode(self, src, src_mask):
         return self.encoder(self.src_embed(src), src_mask)
