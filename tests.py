@@ -180,6 +180,8 @@ def test_encoder_layer(batch_size, seq_length, num_heads, d_ff, d_model, dropout
     np.random.seed(42)
     torch_encoder_layer = nn.TransformerEncoderLayer(d_model, num_heads, d_ff, dropout, batch_first=True).to(DEVICE)
 
+    my_encoder_layer.mha = torch_encoder_layer.self_attn
+
     my_output = my_encoder_layer(src)
     torch_output = torch_encoder_layer(src)
 
