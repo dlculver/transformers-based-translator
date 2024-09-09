@@ -45,7 +45,7 @@ class PositionalEncoding(nn.Module):
         position = torch.arange(0, max_len).unsqueeze(1)  # shape: max_len, 1
         denominator = torch.exp(
             torch.arange(0, d_model, 2)
-            * -(math.log(10**4) / d_model)  # shape: d_model/2
+            * -(math.log(10000) / d_model)  # shape: d_model/2
         )
         pe[:, 0::2] = torch.sin(position * denominator)
         pe[:, 1::2] = torch.cos(position * denominator)
@@ -120,7 +120,7 @@ class PositionwiseFFN(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        return self.linear2(self.dropout(self.linear1(x)))
+        return self.linear2(self.dropout(torch.relu(self.linear1(x))))
 
 
 class EncoderLayer(nn.Module):
