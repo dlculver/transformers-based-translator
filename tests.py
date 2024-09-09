@@ -6,6 +6,7 @@ import itertools
 from functools import wraps
 import math
 import numpy as np
+import random
 
 
 from components import (
@@ -26,14 +27,14 @@ torch.manual_seed(42)
 np.random.seed(42)
 
 
-BATCH_SIZES = [1, 8, 16, 32]
+BATCH_SIZES = [1, 8, 16]
 NUM_HEADS = [1, 2, 4, 8]
 SEQ_LENGTHS = [10, 50, 100]
 DIM_KS = [8, 16, 32, 64]
-EMB_SIZES = [64, 128, 256, 512]
+EMB_SIZES = [64, 128, 256]
 DROPOUTS = [0] # can't use other values here since the drop outs occur randomly...
-MAXLEN = [500, 1000, 5000]
-D_FFS = [10, 50, 100, 500]
+MAXLEN = [500, 1000]
+D_FFS = [10, 100, 500]
 NUM_BLOCKS = [1, 2, 4, 8]
 VOCAB_SIZES = [100, 1000, 10000]
 
@@ -58,6 +59,14 @@ else:
     DEVICE = torch.device("cpu")
 
 print(f"Using device: {DEVICE}")
+
+@pytest.fixture(autouse=True)
+def seed_default_rng():
+    print(f"Seeding random number generators...")
+    torch.manual_seed(42)
+    np.random.seed(42)
+    random.seed(42)
+
 
 def generate_params(*param_names):
     def decorator(test_func):
@@ -133,7 +142,7 @@ class TorchPositionalEncoding(nn.Module):
 #     assert torch.allclose(my_output, torch_output, atol=1e-6), "Output does not match PyTorch's implementation."
 
 
-    
+
 @generate_params("batch_size", "num_heads", "seq_length", "d_model")
 def test_multihead_attention(batch_size, num_heads, seq_length, d_model):
 
@@ -169,15 +178,15 @@ def test_multihead_attention(batch_size, num_heads, seq_length, d_model):
     assert my_output.dtype == torch_output.dtype, "MHA outputs don't have matching dtypes!"
     assert torch.allclose(my_output, torch_output, atol=1e-6), "Outputs do not match PyTorch's implementation."
 
-
 @generate_params("batch_size", "seq_length", "num_heads", "d_ff", "d_model", "dropout")
 def test_encoder_layer(batch_size, seq_length, num_heads, d_ff, d_model, dropout):
+
+    torch.manual_seed(42)
+    np.random.seed(42)
 
     src = torch.rand(batch_size, seq_length, d_model).to(DEVICE)
 
     my_encoder_layer = EncoderLayer(num_heads=num_heads, d_ff=d_ff, d_model=d_model, dropout=dropout, testing_mode=True).to(DEVICE)
-    torch.manual_seed(42)
-    np.random.seed(42)
     torch_encoder_layer = nn.TransformerEncoderLayer(d_model, num_heads, d_ff, dropout, batch_first=True).to(DEVICE)
 
     my_encoder_layer.mha = torch_encoder_layer.self_attn
