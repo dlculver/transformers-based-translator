@@ -19,7 +19,7 @@ def scaled_dpa(query, key, value, mask=None, verbose=False):
     """
 
     d_k = query.size(-1)
-    scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)# (bs, seq_length, seq_length)
+    scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k) # (bs, seq_length, seq_length)
 
     if verbose:
         print(f"Scores shape: {scores.shape}")
@@ -282,7 +282,6 @@ class Generator(nn.Module):
     def forward(self, x):
         return F.log_softmax(self.proj(x), dim=-1)
     
-# now we abstract the above into a EncoderDecoder class. 
 class EncoderDecoder(nn.Module):
     def __init__(self, encoder: Encoder, decoder: Decoder, generator: Generator, embedding: nn.Embedding, pos_encoder: PositionalEncoding, verbose: bool = False):
         super(EncoderDecoder, self).__init__()
@@ -315,34 +314,25 @@ class EncoderDecoder(nn.Module):
         tgt_embed = self.embedding(tgt_tokens)
         tgt_embed = self.pos_encoder(tgt_embed)
         return self.decoder(tgt_embed, enc_output, src_mask, tgt_mask)
+    
+    @classmethod
+    def from_hyperparameters(cls, num_blocks, num_heads, d_model, d_ff, vocab_size, max_len: int = 512, dropout: float = 0.1, verbose: bool = False):
+        # create encoder
+        encoder = Encoder(num_blocks, num_heads, d_model, d_ff, dropout, verbose)
+
+        # create decoder
+        decoder = Decoder(num_blocks, num_heads, d_model, d_ff, dropout, verbose)
+
+        # create embedding and positional encoder
+        embedding = nn.Embedding(vocab_size, d_model)
+        pos_encoder = PositionalEncoding(d_model, dropout, max_len)
+
+        # create generator
+        generator = Generator(d_model, vocab_size)
+
+        return cls(encoder=encoder, decoder=decoder, generator=generator, embedding=embedding, pos_encoder=pos_encoder, verbose=verbose)
 
 
 
-# class EncoderDecoder(nn.Module):
-#     def __init__(
-#         self,
-#         encoder: Encoder,
-#         decoder: Decoder,
-#         src_embed: nn.Module,
-#         tgt_embed: nn.Module,
-#         generator: Generator,
-#     ):
-#         super(EncoderDecoder, self).__init__()
-#         self.encoder = encoder
-#         self.decoder = decoder
-#         self.src_embed = src_embed
-#         self.tgt_embed = tgt_embed
-#         self.generator = generator
 
-#     def forward(self, src, tgt, src_mask, tgt_mask):
-#         enc_output = self.encode(src, src_mask=src_mask)
-#         dec_output = self.decode(
-#             tgt, enc_output=enc_output, src_mask=src_mask, tgt_mask=tgt_mask
-#         )
-#         return self.generator(dec_output)
 
-#     def encode(self, src, src_mask):
-#         return self.encoder(self.src_embed(src), src_mask)
-
-#     def decode(self, tgt, enc_output, src_mask, tgt_mask):
-#         return self.decoder(self.tgt_embed(tgt), enc_output, src_mask, tgt_mask)
