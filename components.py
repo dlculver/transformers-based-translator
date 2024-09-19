@@ -4,32 +4,41 @@ import torch.nn.functional as F
 import math
 
 
-def scaled_dpa(query, key, value, mask=None):
+def scaled_dpa(query, key, value, mask=None, verbose=False):
     """
-    Implementation of Scaled Dot-Product Attention from `Attention is All You Need`.
+    Implements scaled dot product attention.
     Args:
-        query: (batch_size, num_heads, seq_length, dim_k)
-        key: (batch_size, num_heads, seq_length, dim_k)
-        value: (batch_size, num_heads, seq_length, dim_v)
-        mask: (batch_size, num_heads, seq_length, seq_length) or None
+        query: (batch_size, seq_length, dim_k)
+        key: (batch_size, seq_length, dim_k)
+        value: (batch_size, seq_length, dim_v)
+        mask: (batch_size, seq_length) or None
+        verbose: Boolean default False
     Returns:
-        output: (batch_size, num_heads, seq_length, dim_v)
-        attention_weights: (batch_size, num_heads, seq_length, seq_length)
+        attention_output: (batch_size, seq_length, dim_v)
+        attention_weights: (batch_size, seq_length, seq_length)
     """
+
     d_k = query.size(-1)
-    scores = torch.matmul(query, key.transpose(-2, -1))  # Dimension (bs, nh, t, d_k)
+    scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k) # (bs, seq_length, seq_length)
 
-    # normalize the scores by the root of the dimension
-    scores = scores / torch.sqrt(torch.tensor(d_k, dtype=torch.float))  # bs, nh, t, t
-
-    # Where the mask is 0, we replace the scores entry with -\infty
+    if verbose:
+        print(f"Scores shape: {scores.shape}")
+    
+    # apply the mask if necessary
     if mask is not None:
-        scores = scores.masked_fill(mask == 0, float("-inf"))  # bs, nh, t, t
+        scores = scores.masked_fill(mask==0, float('-inf'))
+    
+    # apply softmax to get attention_weights
+    attention_weights = F.softmax(scores, dim=-1) # (bs, seq_length, seq_length)
 
-    attention_weights = F.softmax(
-        scores, dim=-1
-    )  # softmax along rows, each row is a probability vector
+    if verbose:
+        print(f"Attention weights shape: {attention_weights.shape}")
+    
     output = torch.matmul(attention_weights, value)
+    
+    if verbose:
+        print(f"Attention output shape: {output.shape}")
+    
     return output, attention_weights
 
 
@@ -45,7 +54,7 @@ class PositionalEncoding(nn.Module):
         position = torch.arange(0, max_len).unsqueeze(1)  # shape: max_len, 1
         denominator = torch.exp(
             torch.arange(0, d_model, 2)
-            * -(math.log(10000) / d_model)  # shape: d_model/2
+            * -(math.log(10000.0) / d_model)  # shape: d_model/2
         )
         pe[:, 0::2] = torch.sin(position * denominator)
         pe[:, 1::2] = torch.cos(position * denominator)
@@ -55,63 +64,82 @@ class PositionalEncoding(nn.Module):
         self.register_buffer("pe", pe) # what is this for?
 
     def forward(self, x):
-        x = x + self.pe[:, : x.size(1)].requires_grad_(
+        x = x + self.pe[:, : x.size(1), :].requires_grad_(
             False
         )  # shape: (bs, t, d_model). In this case the sequence length is determined by x.size(1)
         return self.dropout(x)
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, num_heads: int, d_model: int, dropout=0.1):
+    def __init__(self, num_heads: int, d_model: int, dropout=0.1, verbose=False):
         super(MultiHeadAttention, self).__init__()
         assert d_model % num_heads == 0, "d_model must be divisible by num_heads."
         self.num_heads = num_heads
         self.d_model = d_model
-
-        # The paper assumes d_k=d_v=d_model/num_heads throughout. They take it to be 64
         self.d_k = d_model // num_heads
+        self.verbose = verbose
+
+        if self.verbose:
+            print(f"Num heads: {num_heads}")
+            print(f"Embedding dimension: {d_model}")
+            print(f"per head dimension: {self.d_k}")
+    
+        # linear layers to project the inputs to query, key, and value
         self.query_linear = nn.Linear(d_model, d_model)
         self.key_linear = nn.Linear(d_model, d_model)
         self.value_linear = nn.Linear(d_model, d_model)
-        self.dropout = nn.Dropout(p=dropout)
+        self.dropout = nn.Dropout(p=dropout) 
         self.output_linear = nn.Linear(d_model, d_model)
 
     def forward(self, query, key, value, mask=None):
-        # query shape is bs, t, d_model
-        # key shape is bs, t, d_model
+        # query shape is bs, seq_length, d_model
+        # key shape is bs, seq_length, d_model
         # value shape is bs, d_model, d_model
         batch_size = query.size(0)
+        seq_length = query.size(1)
 
-        # Apply the linear layers
-        query = self.query_linear(query)  # shape bs, t, d_model
-        key = self.key_linear(key)  # shape bs, t, d_model
-        value = self.value_linear(value)  # shape bs, t, d_model
+        # need to unsqueeze at 1 so as to broadcast the same mask across all heads.
+        if mask is not None:
+            mask = mask.unsqueeze(1) # Same mask applied to all heads. 
 
-        # Reshape and split into the number of heads, resulting dimensions bs, num_heads, t, d_k
-        # TODO(dominic): There is some interesting technical reasons why you have to reshape this way and then transpose. Do some examples in a notebook to see why.
-        query = query.view(batch_size, -1, self.num_heads, self.d_k).transpose(
-            1, 2
-        )  # bs, num_heads, t, d_k
-        key = key.view(batch_size, -1, self.num_heads, self.d_k).transpose(
-            1, 2
-        )  # bs, num_heads, t, d_k
-        value = value.view(batch_size, -1, self.num_heads, self.d_k).transpose(
-            1, 2
-        )  # bs, num_heads, t, d_k
+        if self.verbose and mask is not None:
+            print(f"Mask shape (after unsqueezing at 1): {mask.shape}")
 
-        # Apply scaled dot product attention to each head separately
-        attention_output, attention_weight = scaled_dpa(query, key, value, mask)
+        # apply linear layers
+        query = self.query_linear(query) # shape: bs, seq_length, d_model
+        key = self.key_linear(key) #shape: bs, seq_length, d_model
+        value = self.value_linear(value) # shape: bs, d_model, d_model
 
-        # Concatenate the heads
-        # attention_output shape: (bs, nh, t, d_k)
-        attention_output = (
-            attention_output.transpose(1, 2)
-            .contiguous()
-            .view(batch_size, -1, self.d_model)
-        )
-        return self.output_linear(attention_output)  # bs, t, d_model
+        if self.verbose:
+            print(f"Query shape: {query.shape}")
+            print(f"Key shape: {key.shape}")
+            print(f"Value shape: {value.shape}")
+        
+        # reshape and split into multiple heads
+        query = query.view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2) # (bs, num_heads, seq_length, d_k)
+        key = key.view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2) # (bs, num_heads, seq_length, d_k)
+        value = value.view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2) #(bs, num_heads, seq_length, d_k)
 
+        if self.verbose:
+            print(f"Shapes after projections for query, key, value...")
+            print(f"{query.shape}, {key.shape}, {value.shape}")
 
+        attn_output, attn_weights = scaled_dpa(query, key, value, mask, verbose = self.verbose)
+
+        # we've separated the query key and value into separate heads and then computed the scaled dot-product attention for each head.
+        # Now we must put them back together. 
+        attn_output = attn_output.transpose(1, 2).contiguous().view(batch_size, -1, self.num_heads * self.d_k)
+
+        if self.verbose:
+            print(f"Attention output shape after concat: {attn_output.shape}")
+
+        # apply the final linear layer transformation
+        output = self.output_linear(attn_output)
+        if self.verbose:
+            print(f"Output shape: {output.shape}")
+
+        return output, attn_weights
+    
 class PositionwiseFFN(nn.Module):
     def __init__(self, d_ff: int, d_model: int, dropout: float = 0.1):
         super(PositionwiseFFN, self).__init__()
@@ -124,111 +152,124 @@ class PositionwiseFFN(nn.Module):
 
 
 class EncoderLayer(nn.Module):
-    """Encoder layer as in `Attention is All You Need`. We use postlayer normalization."""
-
-    def __init__(self, num_heads: int, d_model: int, d_ff: int, dropout: float = 0.1):
+    def __init__(self, num_heads: int, d_model: int, d_ff: int, dropout: float = 0.1, verbose: bool = False):
         super(EncoderLayer, self).__init__()
-        self.mha = MultiHeadAttention(
-            num_heads=num_heads, d_model=d_model, dropout=dropout
-        )
+        self.mha = MultiHeadAttention(num_heads=num_heads, d_model=d_model, dropout=dropout, verbose=verbose)
         self.ffn = PositionwiseFFN(d_ff=d_ff, d_model=d_model, dropout=dropout)
         self.layernorm1 = nn.LayerNorm(d_model)
         self.layernorm2 = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
+        self.verbose = verbose
 
     def forward(self, x, mask=None):
-
-        # Self-attention
-        attn_output = self.mha(x, x, x, mask)
+        if self.verbose:
+            print(f"Input to Encoder Layer: {x.shape}")
+        
+        # Multi-head attention with residual connection and layer normalization
+        attn_output, _ = self.mha(x, x, x, mask)
+        if self.verbose:
+            print(f"attn_output shape: {attn_output.shape}")
         out1 = self.layernorm1(x + self.dropout(attn_output))
 
-        # Feedforward
-        ff_output = self.ffn(out1)
-        out2 = self.layernorm2(out1 + self.dropout(ff_output))
+        # Feedforward with residual connection and layer normalization
+        ffn_output = self.ffn(out1)
+        out2 = self.layernorm2(out1 + self.dropout(ffn_output))  # Fixed: add out1, not x
 
+        if self.verbose:
+            print(f"Output from Encoder Layer: {out2.shape}")
+        
         return out2
 
 
 class Encoder(nn.Module):
-    def __init__(
-        self,
-        num_blocks: int,
-        num_heads: int,
-        d_model: int,
-        d_ff: int,
-        dropout: float = 0.1,
-    ):
+    def __init__(self, num_blocks: int, num_heads: int, d_model: int, d_ff: int, dropout: float = 0.1, verbose: bool = False):
         super(Encoder, self).__init__()
-        self.encoder_blocks = nn.ModuleList(
-            [
-                EncoderLayer(
-                    num_heads=num_heads, d_model=d_model, d_ff=d_ff, dropout=dropout
-                )
-                for _ in range(num_blocks)
-            ]
-        )
+        self.num_blocks = num_blocks
+        self.verbose = verbose
+
+        # encoder layers
+        self.encoder_blocks = nn.ModuleList([
+            EncoderLayer(num_heads=num_heads, d_model=d_model, d_ff=d_ff, dropout=dropout, verbose=verbose) for _ in range(num_blocks)
+        ])
+
+        # final layer normalization layer
         self.layernorm = nn.LayerNorm(d_model)
 
-    def forward(self, x, mask=None):
-        for block in self.encoder_blocks:
-            x = block(x, mask)
+    def forward(self, x, src_mask = None):
 
-        return self.layernorm(x)
+        if self.verbose:
+            print(f"Input of shape: {x.shape}")
+        
+        for i, block in enumerate(self.encoder_blocks):
+            if self.verbose:
+                print(f"\n------------ Passing Through Encoder block {i + 1} ----------------")
+            
+            x = block(x, mask=src_mask)
 
+        # apply final layer normalization
+        x = self.layernorm(x)
 
-class DecoderLayer(nn.Module):
-    def __init__(self, num_heads: int, d_model: int, d_ff: int, dropout: float = 0.1):
-        super(DecoderLayer, self).__init__()
-        self.self_attn = MultiHeadAttention(
-            num_heads=num_heads, d_model=d_model, dropout=dropout
-        )
-        self.src_attn = MultiHeadAttention(
-            num_heads=num_heads, d_model=d_model, dropout=dropout
-        )
-        self.ffn = PositionwiseFFN(d_ff=d_ff, d_model=d_model, dropout=dropout)
-        self.layernorms = nn.ModuleList([nn.LayerNorm(d_model) for _ in range(3)])
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, x, enc_output, src_mask=None, tgt_mask=None):
-        # masked self_attention
-        self_attn_output = self.self_attn(x, x, x, tgt_mask)
-        x = self.layernorms[0](x + self.dropout(self_attn_output))
-
-        # encoder decoder attn
-        enc_dec_attn_output = self.src_attn(x, enc_output, enc_output, src_mask)
-        x = self.layernorms[1](x + self.dropout(enc_dec_attn_output))
-
-        # feed forward network
-        ffn_output = self.ffn(x)
-        x = self.layernorms[2](x + self.dropout(ffn_output))
+        if self.verbose:
+            print(f"\nFinal output shape is: {x.shape}")
 
         return x
 
 
-class Decoder(nn.Module):
-    def __init__(
-        self,
-        num_blocks: int,
-        num_heads: int,
-        d_model: int,
-        d_ff: int,
-        dropout: float = 0.1,
-    ):
-        super(Decoder, self).__init__()
-        self.decoder_blocks = nn.ModuleList(
-            [
-                DecoderLayer(
-                    num_heads=num_heads, d_model=d_model, d_ff=d_ff, dropout=dropout
-                )
-                for _ in range(num_blocks)
-            ]
-        )
-        self.layernorm = nn.LayerNorm(d_model)
+class DecoderLayer(nn.Module):
+    def __init__(self, num_heads: int, d_model: int, d_ff: int, dropout: float = 0.1, verbose=False):
+        super(DecoderLayer, self).__init__()
+        self.self_attn = MultiHeadAttention(num_heads=num_heads, d_model=d_model, dropout=dropout, verbose=verbose)
+        self.src_attn = MultiHeadAttention(num_heads=num_heads, d_model=d_model, dropout=dropout, verbose=verbose)
+        self.ffn = PositionwiseFFN(d_ff=d_ff, d_model=d_model, dropout=dropout)
+        self.layernorms = nn.ModuleList([nn.LayerNorm(d_model) for _ in range(3)])
+        self.dropout = nn.Dropout(dropout)
+        self.verbose = verbose
 
     def forward(self, x, enc_output, src_mask=None, tgt_mask=None):
-        for block in self.decoder_blocks:
-            x = block(x, enc_output, src_mask, tgt_mask)
-        return self.layernorm(x)
+
+        if self.verbose:
+            print(f"Input shape x: {x.shape}")
+            print(f"Encoder output shape: {enc_output.shape}\n")
+        # masked self-attention over the target (with look-ahead mask)
+
+        if self.verbose:
+            print(f"Passing through self-attention")
+        self_attn_output, _ = self.self_attn(x, x, x, tgt_mask)
+        x = self.layernorms[0](x + self.dropout(self_attn_output))
+
+        if self.verbose:
+            print(f"\nPassing Through encoder-decoder attention")
+        # encoder-decoder attention over the encoder output (attend to source)
+        enc_dec_attn_output, _ = self.src_attn(x, enc_output, enc_output, src_mask)
+        x = self.layernorms[1](x + self.dropout(enc_dec_attn_output))
+
+        if self.verbose:
+            print(f"\nFinal feedforward of layer")
+        # feedforward with residual connection and layer normalization
+        ffn_output = self.ffn(x)
+        x = self.layernorms[2](x + self.dropout(ffn_output))
+        
+        if self.verbose:
+            print(f"\nOutput shape: {x.shape}")
+
+        return x
+
+class Decoder(nn.Module):
+    def __init__(self, num_blocks: int, num_heads: int, d_model: int, d_ff: int, dropout: float = 0.1, verbose: bool = True):
+        super(Decoder, self).__init__()
+        self.decoder_blocks = nn.ModuleList([
+            DecoderLayer(num_heads=num_heads, d_model=d_model, d_ff=d_ff, dropout=dropout, verbose=verbose) for _ in range(num_blocks)
+        ])
+        self.layernorm = nn.LayerNorm(d_model)
+        self.verbose = verbose
+
+    def forward(self, tgt, enc_output, src_mask=None, tgt_mask=None):
+        for i, block in enumerate(self.decoder_blocks):
+            if self.verbose:
+                print(f"\n------------- Passing Through Decoder Block {i+1} ----------------")
+            tgt = block(tgt, enc_output, src_mask, tgt_mask)
+
+        return self.layernorm(tgt)
 
 
 class Generator(nn.Module):
@@ -240,33 +281,58 @@ class Generator(nn.Module):
 
     def forward(self, x):
         return F.log_softmax(self.proj(x), dim=-1)
-
-
+    
 class EncoderDecoder(nn.Module):
-    def __init__(
-        self,
-        encoder: Encoder,
-        decoder: Decoder,
-        src_embed: nn.Module,
-        tgt_embed: nn.Module,
-        generator: Generator,
-    ):
+    def __init__(self, encoder: Encoder, decoder: Decoder, generator: Generator, embedding: nn.Embedding, pos_encoder: PositionalEncoding, verbose: bool = False):
         super(EncoderDecoder, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
-        self.src_embed = src_embed
-        self.tgt_embed = tgt_embed
         self.generator = generator
+        self.embedding = embedding
+        self.pos_encoder = pos_encoder
+        self.verbose = verbose
 
-    def forward(self, src, tgt, src_mask, tgt_mask):
-        enc_output = self.encode(src, src_mask=src_mask)
-        dec_output = self.decode(
-            tgt, enc_output=enc_output, src_mask=src_mask, tgt_mask=tgt_mask
-        )
-        return self.generator(dec_output)
+    def forward(self, src_tokens, tgt_input, src_mask, tgt_mask):
+        # Encoder
+        encoder_output = self.encode(src_tokens, src_mask)
 
-    def encode(self, src, src_mask):
-        return self.encoder(self.src_embed(src), src_mask)
+        # Decoder
+        tgt_embed = self.embedding(tgt_input)
+        tgt_embed = self.pos_encoder(tgt_embed)
+        dec_output = self.decoder(tgt=tgt_embed, enc_output=encoder_output, src_mask=src_mask, tgt_mask = tgt_mask)
 
-    def decode(self, tgt, enc_output, src_mask, tgt_mask):
-        return self.decoder(self.tgt_embed(tgt), enc_output, src_mask, tgt_mask)
+        output_log_probs = self.generator(dec_output)
+
+        return output_log_probs
+
+    def encode(self, src_tokens, src_mask):
+        src_embed = self.embedding(src_tokens)
+        src_embed = self.pos_encoder(src_embed)
+        return self.encoder(src_embed, src_mask)
+
+    def decode(self, tgt_tokens, enc_output, src_mask, tgt_mask):
+        tgt_embed = self.embedding(tgt_tokens)
+        tgt_embed = self.pos_encoder(tgt_embed)
+        return self.decoder(tgt_embed, enc_output, src_mask, tgt_mask)
+    
+    @classmethod
+    def from_hyperparameters(cls, num_blocks, num_heads, d_model, d_ff, vocab_size, max_len: int = 512, dropout: float = 0.1, verbose: bool = False):
+        # create encoder
+        encoder = Encoder(num_blocks, num_heads, d_model, d_ff, dropout, verbose)
+
+        # create decoder
+        decoder = Decoder(num_blocks, num_heads, d_model, d_ff, dropout, verbose)
+
+        # create embedding and positional encoder
+        embedding = nn.Embedding(vocab_size, d_model)
+        pos_encoder = PositionalEncoding(d_model, dropout, max_len)
+
+        # create generator
+        generator = Generator(d_model, vocab_size)
+
+        return cls(encoder=encoder, decoder=decoder, generator=generator, embedding=embedding, pos_encoder=pos_encoder, verbose=verbose)
+
+
+
+
+
