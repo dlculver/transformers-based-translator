@@ -81,7 +81,7 @@ def collate_fn(batch, pad_token_id: int):
     return {
         'src_tokens': src_batch,
         'tgt_input': tgt,
-        'tgt_output': tgt_output, 
+        'tgt_output': tgt_y, 
         'src_mask': src_mask,
         'tgt_mask': tgt_mask,
     }
