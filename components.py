@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+from typing import List
 
 
 def scaled_dpa(query, key, value, mask=None, verbose=False):
@@ -306,17 +307,39 @@ class EncoderDecoder(nn.Module):
         return output_log_probs
 
     def encode(self, src_tokens, src_mask):
+        """Pass source and source maskthrough the encoder
+            Args:
+                src_tokens -- torch.Tensor
+                src_mask -- torch.Tensor
+            Output:
+                encoder_output -- torch.Tensor
+            """
         src_embed = self.embedding(src_tokens)
         src_embed = self.pos_encoder(src_embed)
         return self.encoder(src_embed, src_mask)
 
     def decode(self, tgt_tokens, enc_output, src_mask, tgt_mask):
+        """Pass tgt_tokens and encoder hidden state through the decoder
+            Args:
+                tgt_tokens: torch.Tensor
+                enc_output: torch.Tensor
+                src_mask: torch.Tensor
+                tgt_mask: torch.Tensor
+            Output:
+                decoder_output: torch.Tensor"""
         tgt_embed = self.embedding(tgt_tokens)
         tgt_embed = self.pos_encoder(tgt_embed)
         return self.decoder(tgt_embed, enc_output, src_mask, tgt_mask)
     
+    def embed_tokens(self, tokens: torch.Tensor):
+        """embeds and adds positional encodings for tokens."""
+        embed = self.embedding(tokens)
+        embed = self.pos_encoder(embed)
+        return embed
+    
     @classmethod
     def from_hyperparameters(cls, num_blocks, num_heads, d_model, d_ff, vocab_size, max_len: int = 512, dropout: float = 0.1, verbose: bool = False):
+        """Class method to initialize a new model."""
         # create encoder
         encoder = Encoder(num_blocks, num_heads, d_model, d_ff, dropout, verbose)
 
@@ -332,7 +355,70 @@ class EncoderDecoder(nn.Module):
 
         return cls(encoder=encoder, decoder=decoder, generator=generator, embedding=embedding, pos_encoder=pos_encoder, verbose=verbose)
 
+class Translator:
+    def __init__(self, model: EncoderDecoder, tokenizer, bos_token_id: int, eos_token_id: int, pad_token_id: int, device):
+        self.model = model
+        self.tokenizer = tokenizer
+        self.bos = bos_token_id
+        self.eos = eos_token_id
+        self.pad = pad_token_id
+        self.device = device
 
+    def decode(self, src_sentence, max_len: int = 500, mode: str = 'greedy'):
+        if mode == 'greedy':
+            inferred_tokens = self._greedy_decode(src_sentence, max_len)
+            return self._ids_to_text(inferred_tokens)
+        else:
+            raise NotImplementedError("Mode not yet implemented")
+        
+    def _tokenize_text(self, text: str) -> torch.Tensor:
+        tokens = self.tokenizer.encode(text).ids
+        tokens = [self.bos] + tokens + [self.eos] # add bos and eos tokens
+        tokens = torch.tensor(tokens)
+
+        return tokens
+
+    def _ids_to_text(self, tokens: torch.Tensor | List[int]) -> str:
+        """Decode a torch tensor or list of integers into text"""
+        # TODO(dominic): currently this only implements tokenization for a 1-dimensional tensor, should abstract to batches?
+        if isinstance(tokens, torch.Tensor):
+            tokens = tokens.to_list()
+        # remove special tokens
+        tokens = [token for token in tokens if token not in [self.bos, self.eos, self.pad]]
+        return self.tokenizer.decode(tokens)
+        
+
+    def _greedy_decode(self, src_sentence, max_len: int = 500):
+        self.model.eval()
+
+        src_tokens = self._tokenize_text(src_sentence)
+        src_mask = (src_tokens != self.pad).unsqueeze(0).to(self.device)
+        
+        # store encoder hidden states for the src_tokens
+        encoder_output = self.model.encode(src_tokens=src_tokens, src_mask=src_mask)
+
+        # initialize the tgt_tokens
+        tgt_tokens = torch.tensor([self.bos], dtype=torch.long).to(self.device)
+
+        for _ in range(max_len):
+
+            # create target mask
+            tgt_seq_len = tgt_tokens.size(0)
+            tgt_mask = torch.tril(torch.ones(1, tgt_seq_len, tgt_seq_len)).to(self.device)
+
+            tgt_embed = self.model.embed_tokens(tgt_tokens)
+            
+            output_logits = self.model.decoder(tgt_embed, encoder_output, src_mask, tgt_mask)
+            output_log_probs = self.model.generator(output_logits)
+
+            next_token = torch.argmax(output_log_probs[:, -1, :], dim=-1)
+            tgt_tokens = torch.cat([tgt_tokens, next_token])
+
+            if next_token.item() == self.eos or tgt_tokens.size(0) >= max_len:
+                break
+        
+        return tgt_tokens
+    
 
 
 
