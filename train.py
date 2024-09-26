@@ -82,7 +82,7 @@ class Trainer:
         training_losses.append(loss.item())
 
         if i % 100 == 0:
-            print(
+            tqdm.write(
                 f"Epoch {epoch + 1}/{n_epochs}, average loss at batch {i}: {sum(training_losses)/len(training_losses):.4f}"
             )
 
