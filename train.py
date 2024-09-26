@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 import wandb
+import os
 
 from components import EncoderDecoder
 
@@ -125,9 +126,12 @@ class Trainer:
         training_dl: DataLoader,
         validation_dl: DataLoader,
         n_epochs: int,
-        save_path: str,
+        save_dir: str,
     ):
         """Main function to handle the full training and validation process."""
+        os.makedirs(save_dir, exist_ok=True)
+        model_save_path = os.path.join(save_dir, "model.pth")
+        loss_save_path = os.path.join(save_dir, "losses.pth")
         for epoch in tqdm(range(n_epochs)):
             self.train_epoch(training_dl=training_dl, epoch=epoch, n_epochs=n_epochs)
             avg_val_loss = self.validate_epoch(
@@ -137,10 +141,16 @@ class Trainer:
             if avg_val_loss < self.best_val_loss:
                 print(f"Validation loss has improved!")
                 self.best_val_loss = avg_val_loss
-                torch.save(self.model.state_dict(), save_path)
+                torch.save(self.model.state_dict(), model_save_path)
 
         print("Training complete...")
         print(f"Best validation loss: {self.best_val_loss: .4f}")
+        print(f"Saving losses for later use...")
+        torch.save({
+            'training_losses': self.epoch_losses,
+            'per_batch_losses': self.batch_losses,
+            'validation_losses': self.val_losses
+        }, loss_save_path)
 
 
 if __name__ == "__main__":
@@ -208,4 +218,4 @@ if __name__ == "__main__":
         val_ds, batch_size=4, collate_fn=lambda batch: collate_fn(batch, PAD_TOKEN_ID)
     )
 
-    trainer.train(train_dl, valid_dl, n_epochs=4, save_path="test_model")
+    trainer.train(train_dl, valid_dl, n_epochs=4, save_dir="test_model")
