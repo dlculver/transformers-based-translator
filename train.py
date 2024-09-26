@@ -36,10 +36,16 @@ class Trainer:
         self.d_model = d_model
         self.step_num = 0
 
+        self.epoch_losses = []
+        self.batch_losses = []
+        self.val_losses = []
+
+        self.best_val_loss = float('inf')
+
         self.model.to(self.device)
 
     def get_lr(self):
-        """Learning Rate Scheduler"""
+        """Learning Rate Scheduler as implemented in `Attention is All You Need`"""
         return self.d_model**-0.5 * min(
             self.step_num**-0.5, self.step_num * self.warmup_steps**-1.5
         )
@@ -79,8 +85,11 @@ class Trainer:
                 f"Epoch {epoch + 1}/{n_epochs}, average loss at batch {i}: {sum(training_losses)/len(training_losses):.4f}"
             )
 
+        average_training_loss = sum(training_losses)/len(training_losses)
+        self.epoch_losses.append(average_training_loss)
+        self.batch_losses.extend(training_losses)
         print(
-            f"Epoch {epoch + 1}/{n_epochs}, Average training loss: {sum(training_losses)/len(training_losses):.4f}"
+            f"Epoch {epoch + 1}/{n_epochs}, Average training loss: {average_training_loss:.4f}"
         )
 
     def validate_epoch(self, validation_dl: DataLoader, epoch: int, n_epochs: int):
@@ -104,9 +113,12 @@ class Trainer:
                 validation_losses.append(loss.item())
 
         avg_val_loss = sum(validation_losses) / len(validation_losses)
+        self.val_losses.append(avg_val_loss)
         print(
             f"Epoch: {epoch + 1}/{n_epochs}, Average validation loss: {avg_val_loss: .4f}"
         )
+
+        return avg_val_loss
 
     def train(
         self,
@@ -118,14 +130,17 @@ class Trainer:
         """Main function to handle the full training and validation process."""
         for epoch in tqdm(range(n_epochs)):
             self.train_epoch(training_dl=training_dl, epoch=epoch, n_epochs=n_epochs)
-            self.validate_epoch(
+            avg_val_loss = self.validate_epoch(
                 validation_dl=validation_dl, epoch=epoch, n_epochs=n_epochs
             )
 
-        print("Training complete...")
-        print(f"Saving model....")
+            if avg_val_loss < self.best_val_loss:
+                print(f"Validation loss has improved!")
+                self.best_val_loss = avg_val_loss
+                torch.save(self.model.state_dict(), save_path)
 
-        torch.save(self.model.state_dict(), save_path)
+        print("Training complete...")
+        print(f"Best validation loss: {self.best_val_loss: .4f}")
 
 
 if __name__ == "__main__":
