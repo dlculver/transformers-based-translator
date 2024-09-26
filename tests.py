@@ -10,7 +10,7 @@ from components import (
     DecoderLayer,
     Decoder,
     Generator,
-    EncoderDecoder
+    EncoderDecoder,
 )
 
 # set random seed
@@ -32,6 +32,7 @@ def test_scaled_dpa():
     assert output.shape == (batch_size, num_heads, seq_length, dim_k)
     assert attention_weights.shape == (batch_size, num_heads, seq_length, seq_length)
 
+
 def test_positional_encoding():
     d_model = 16
     seq_length = 10
@@ -39,9 +40,10 @@ def test_positional_encoding():
     dropout = 0.1
     pe = PositionalEncoding(d_model, dropout)
     x = torch.rand(batch_size, seq_length, d_model)
-    
+
     out = pe(x)
     assert out.shape == (batch_size, seq_length, d_model)
+
 
 def test_multi_head_attention():
     batch_size = 2
@@ -55,8 +57,9 @@ def test_multi_head_attention():
 
     mha = MultiHeadAttention(num_heads, d_model)
     output = mha(query, key, value, mask)
-    
+
     assert output.shape == (batch_size, seq_length, d_model)
+
 
 def test_positionwise_ffn():
     d_ff = 32
@@ -66,9 +69,10 @@ def test_positionwise_ffn():
     dropout = 0.1
     ffn = PositionwiseFFN(d_ff, d_model, dropout)
     x = torch.rand(batch_size, seq_length, d_model)
-    
+
     out = ffn(x)
     assert out.shape == (batch_size, seq_length, d_model)
+
 
 def test_encoder_layer():
     num_heads = 4
@@ -82,8 +86,9 @@ def test_encoder_layer():
 
     encoder_layer = EncoderLayer(num_heads, d_model, d_ff, dropout)
     out = encoder_layer(x, mask)
-    
+
     assert out.shape == (batch_size, seq_length, d_model)
+
 
 def test_encoder():
     num_blocks = 2
@@ -98,8 +103,9 @@ def test_encoder():
 
     encoder = Encoder(num_blocks, num_heads, d_model, d_ff, dropout)
     out = encoder(x, mask)
-    
+
     assert out.shape == (batch_size, seq_length, d_model)
+
 
 def test_decoder_layer():
     num_heads = 4
@@ -115,8 +121,9 @@ def test_decoder_layer():
 
     decoder_layer = DecoderLayer(num_heads, d_model, d_ff, dropout)
     out = decoder_layer(x, enc_output, src_mask, tgt_mask)
-    
+
     assert out.shape == (batch_size, seq_length, d_model)
+
 
 def test_decoder():
     num_blocks = 2
@@ -133,8 +140,9 @@ def test_decoder():
 
     decoder = Decoder(num_blocks, num_heads, d_model, d_ff, dropout)
     out = decoder(x, enc_output, src_mask, tgt_mask)
-    
+
     assert out.shape == (batch_size, seq_length, d_model)
+
 
 def test_generator():
     d_model = 16
@@ -142,11 +150,12 @@ def test_generator():
     seq_length = 10
     batch_size = 2
     x = torch.rand(batch_size, seq_length, d_model)
-    
+
     generator = Generator(d_model, vocab_size)
     out = generator(x)
-    
+
     assert out.shape == (batch_size, seq_length, vocab_size)
+
 
 def test_encoder_decoder():
     num_blocks = 2
@@ -170,8 +179,9 @@ def test_encoder_decoder():
 
     model = EncoderDecoder(encoder, decoder, src_embed, tgt_embed, generator)
     out = model(src, tgt, src_mask, tgt_mask)
-    
+
     assert out.shape == (batch_size, seq_length, vocab_size)
+
 
 if __name__ == "__main__":
     test_scaled_dpa()
