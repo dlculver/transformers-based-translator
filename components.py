@@ -2,11 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-<<<<<<< HEAD
 from typing import List
-=======
-import numpy as np
->>>>>>> 8f4f192 (wip: tried adding a  parameter for the encoder layer to evaluate encoder layer. allclose assertions still fail.)
 
 
 def scaled_dpa(query, key, value, mask=None, verbose=False):
