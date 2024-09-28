@@ -32,7 +32,7 @@ class Trainer:
         device=DEVICE,
         warmup_steps: int = 5000,
         d_model: int = 512,
-    ):  
+    ):
         self.model = model
         self.optimizer = optimizer
         self.tokenizer = tokenizer
@@ -47,7 +47,7 @@ class Trainer:
         self.batch_losses = []
         self.val_losses = []
         self.avg_bleu_scores = []
-        self.best_val_loss = float('inf')
+        self.best_val_loss = float("inf")
 
         # move model to device
         self.model.to(self.device)
@@ -101,7 +101,7 @@ class Trainer:
                     f"Epoch {epoch + 1}/{n_epochs}, average loss at batch {i}: {sum(training_losses)/len(training_losses):.4f}"
                 )
 
-        average_training_loss = sum(training_losses)/len(training_losses)
+        average_training_loss = sum(training_losses) / len(training_losses)
         self.epoch_losses.append(average_training_loss)
         self.batch_losses.extend(training_losses)
         print(
@@ -132,7 +132,9 @@ class Trainer:
                 predicted_ids = torch.argmax(output, dim=-1)
                 predicted_batch = [ids.tolist() for ids in predicted_ids]
                 reference_batch = [ids.tolist() for ids in tgt_output]
-                total_bleu_score += self.bleu_evaluator.evaluate_batch_bleu(predicted_batch=predicted_batch, reference_batch=reference_batch)
+                total_bleu_score += self.bleu_evaluator.evaluate_batch_bleu(
+                    predicted_batch=predicted_batch, reference_batch=reference_batch
+                )
 
         avg_val_loss = sum(validation_losses) / len(validation_losses)
         avg_bleu_score = total_bleu_score / len(valid_dl)
@@ -170,12 +172,15 @@ class Trainer:
         print("Training complete...")
         print(f"Best validation loss: {self.best_val_loss: .4f}")
         print(f"Saving losses for later use...")
-        torch.save({
-            'training_losses': self.epoch_losses,
-            'per_batch_losses': self.batch_losses,
-            'validation_losses': self.val_losses,
-            'bleu_scores': self.avg_bleu_scores
-        }, loss_save_path)
+        torch.save(
+            {
+                "training_losses": self.epoch_losses,
+                "per_batch_losses": self.batch_losses,
+                "validation_losses": self.val_losses,
+                "bleu_scores": self.avg_bleu_scores,
+            },
+            loss_save_path,
+        )
 
 
 if __name__ == "__main__":
