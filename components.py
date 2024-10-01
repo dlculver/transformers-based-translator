@@ -496,7 +496,7 @@ class Translator:
 
     def _ids_to_text(self, tokens: torch.Tensor | List[int]) -> str:
         """Decode a torch tensor or list of integers into text"""
-        # TODO(dominic): currently this only implements tokenization for a 1-dimensional tensor, should abstract to batches?
+        # TODO(dominic): currently this only implements tokenization for a 1-dimensional tensor, should generalize to batches?
         if isinstance(tokens, torch.Tensor):
             tokens = tokens.to_list()
         # remove special tokens
