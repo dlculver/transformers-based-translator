@@ -498,7 +498,7 @@ class Translator:
         """Decode a torch tensor or list of integers into text"""
         # TODO(dominic): currently this only implements tokenization for a 1-dimensional tensor, should generalize to batches?
         if isinstance(tokens, torch.Tensor):
-            tokens = tokens.to_list()
+            tokens = tokens.tolist()
         # remove special tokens
         tokens = [
             token for token in tokens if token not in [self.bos, self.eos, self.pad]

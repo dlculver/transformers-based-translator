@@ -1,4 +1,3 @@
-from tokenizers import ByteLevelBPETokenizer
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 
 
