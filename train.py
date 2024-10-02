@@ -71,7 +71,7 @@ class Trainer:
         training_losses = []
         device = self.device
 
-        for i, batch in tqdm(enumerate(training_dl), leave=True, position=0):
+        for i, batch in tqdm(enumerate(training_dl), total=len(training_dl), leave=True, position=0):
             self.step_num += 1
 
             # update the learning rate according to the scheduler get_lr.
