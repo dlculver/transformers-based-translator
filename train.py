@@ -97,9 +97,11 @@ class Trainer:
             training_losses.append(loss.item())
 
             if i % 100 == 0:
+                avg_loss = sum(training_losses)/len(training_losses)
                 tqdm.write(
                     f"Epoch {epoch + 1}/{n_epochs}, average loss at batch {i}: {sum(training_losses)/len(training_losses):.4f}"
                 )
+                wandb.log({"train_loss": avg_loss, "epoch": epoch + 1, "batch": i}) 
 
         average_training_loss = sum(training_losses) / len(training_losses)
         self.epoch_losses.append(average_training_loss)
@@ -107,6 +109,7 @@ class Trainer:
         print(
             f"Epoch {epoch + 1}/{n_epochs}, Average training loss: {average_training_loss:.4f}"
         )
+        wandb.log({"avg_train_loss": average_training_loss})
 
     def validate_epoch(self, validation_dl: DataLoader, epoch: int, n_epochs: int):
         self.model.eval()
@@ -143,6 +146,7 @@ class Trainer:
         print(
             f"Epoch: {epoch + 1}/{n_epochs}, Average validation loss: {avg_val_loss: .4f}"
         )
+        wandb.log({"val_loss": avg_val_loss, "avg_bleu_score": avg_bleu_score})
 
         return avg_val_loss
 
@@ -169,6 +173,11 @@ class Trainer:
                 self.best_val_loss = avg_val_loss
                 torch.save(self.model.state_dict(), model_save_path)
 
+                # log model as wandb artifact
+                artifact = wandb.Artifact(f"best_model", type="model")
+                artifact.add_file(model_save_path)
+                wandb.log_artifact(artifact)
+
         print("Training complete...")
         print(f"Best validation loss: {self.best_val_loss: .4f}")
         print(f"Saving losses for later use...")
@@ -181,6 +190,7 @@ class Trainer:
             },
             loss_save_path,
         )
+        wandb.save(loss_save_path)
 
 
 if __name__ == "__main__":

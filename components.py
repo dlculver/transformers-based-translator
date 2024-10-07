@@ -438,6 +438,7 @@ class EncoderDecoder(nn.Module):
         max_len: int = 512,
         dropout: float = 0.1,
         verbose: bool = False,
+        **kwargs
     ):
         """Class method to initialize a new model."""
         # create encoder
