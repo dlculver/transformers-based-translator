@@ -2,6 +2,7 @@ from datasets import load_dataset
 from tokenizers import ByteLevelBPETokenizer
 from tqdm import tqdm
 import os
+import argparse
 
 from typing import List
 
@@ -39,16 +40,22 @@ def train_tokenizer(
     tokenizer.save_model(save_path)
 
 
-def main():
+def main(save_path: str):
 
     dataset = load_dataset("wmt14", "de-en")
     corpus_path = "train_texts.txt"
     create_corpus(dataset, corpus_path)
 
-    train_tokenizer(corpus_path, "new_tokenizer")
+    train_tokenizer(corpus_path, save_path)
 
     print(f"Finished training BPE tokenizer!")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description="Train a BPE tokenizer for German and English."
+    )
+    parser.add_argument("--save-path", required=True, help="Path to save the resulting trained tokenizer to.")
+    args = parser.parse_args()
+
+    main(args.save_path)
