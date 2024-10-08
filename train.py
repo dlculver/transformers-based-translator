@@ -29,7 +29,7 @@ class Trainer:
         optimizer,
         tokenizer: ByteLevelBPETokenizer,
         criterion=nn.NLLLoss(),
-        device=DEVICE,
+        device=None,
         warmup_steps: int = 5000,
         d_model: int = 512,
     ):
@@ -37,7 +37,7 @@ class Trainer:
         self.optimizer = optimizer
         self.tokenizer = tokenizer
         self.criterion = criterion
-        self.device = device
+        self.device = device if device else torch.device("cpu")
         self.warmup_steps = warmup_steps
         self.d_model = d_model
         self.step_num = 0
@@ -49,7 +49,15 @@ class Trainer:
         self.avg_bleu_scores = []
         self.best_val_loss = float("inf")
 
-        # move model to device
+        # Move the model to the device and enable data parallelism if multiple GPUs are present.
+        if self.device.type == "cuda":
+            self.num_gpus = torch.cuda.device_count()
+            print(f"Using {self.num_gpus} GPU(s)")
+            if self.num_gpus > 1:
+                self.model = nn.DataParallel(self.model)
+        else:
+            self.num_gpus = 0
+            print(f"Using CPU")
         self.model.to(self.device)
 
         # id attributes associated to tokenizer
