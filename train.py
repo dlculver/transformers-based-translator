@@ -160,9 +160,9 @@ class Trainer:
         avg_val_loss = sum(validation_losses) / len(validation_losses)
         self.val_losses.append(avg_val_loss)
         print(
-            f"Epoch {epoch + 1}/{n_epochs}, Batch {batch_num}, Average validation loss: {avg_val_loss}"
+            f"Epoch {epoch + 1}/{n_epochs}, Batch {batch_num}, Average validation loss: {avg_val_loss: .4f}"
         )
-
+        wandb.log({"val_loss": avg_val_loss})
         # put the model back into train mode
         self.model.train()
         return avg_val_loss
