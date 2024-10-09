@@ -196,7 +196,7 @@ class Trainer:
                 )
 
         avg_val_loss = sum(validation_losses) / len(validation_losses)
-        avg_bleu_score = total_bleu_score / len(valid_dl)
+        avg_bleu_score = total_bleu_score / len(self.val_dl)
         self.val_losses.append(avg_val_loss)
         self.avg_bleu_scores.append(avg_bleu_score)
         print(
