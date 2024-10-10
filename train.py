@@ -26,6 +26,8 @@ class Trainer:
     def __init__(
         self,
         model: EncoderDecoder,
+        train_dl: DataLoader,
+        val_dl: DataLoader,
         optimizer,
         tokenizer: ByteLevelBPETokenizer,
         criterion=nn.NLLLoss(),
@@ -34,6 +36,8 @@ class Trainer:
         d_model: int = 512,
     ):
         self.model = model
+        self.train_dl = train_dl
+        self.val_dl = val_dl
         self.optimizer = optimizer
         self.tokenizer = tokenizer
         self.criterion = criterion
@@ -74,12 +78,14 @@ class Trainer:
             self.step_num**-0.5, self.step_num * self.warmup_steps**-1.5
         )
 
-    def train_epoch(self, training_dl: DataLoader, epoch: int, n_epochs: int):
+    def train_epoch(self, epoch: int, n_epochs: int, model_save_path: str):
         self.model.train()
         training_losses = []
         device = self.device
 
-        for i, batch in tqdm(enumerate(training_dl), total=len(training_dl), leave=True, position=0):
+        for i, batch in tqdm(
+            enumerate(self.train_dl), total=len(self.train_dl), leave=True, position=0
+        ):
             self.step_num += 1
 
             # update the learning rate according to the scheduler get_lr.
@@ -104,12 +110,23 @@ class Trainer:
 
             training_losses.append(loss.item())
 
-            if i % 100 == 0:
-                avg_loss = sum(training_losses)/len(training_losses)
+            if i % 100 == 0 and i > 0:
+                avg_loss = sum(training_losses) / len(training_losses)
                 tqdm.write(
                     f"Epoch {epoch + 1}/{n_epochs}, average loss at batch {i}: {sum(training_losses)/len(training_losses):.4f}"
                 )
-                wandb.log({"train_loss": avg_loss, "epoch": epoch + 1, "batch": i}) 
+                wandb.log({"train_loss": avg_loss, "epoch": epoch + 1, "batch": i})
+            if i % 500 == 0 and i > 0:
+                avg_val_loss = self._validate(epoch, n_epochs, i)
+                if avg_val_loss < self.best_val_loss:
+                    print(f"Validation loss has improved!")
+                    self.best_val_loss = avg_val_loss
+                    torch.save(self.model.state_dict(), model_save_path)
+
+                    # log model as wandb artifact
+                    artifact = wandb.Artifact(f"best_model", type="model")
+                    artifact.add_file(model_save_path)
+                    wandb.log_artifact(artifact)
 
         average_training_loss = sum(training_losses) / len(training_losses)
         self.epoch_losses.append(average_training_loss)
@@ -119,14 +136,45 @@ class Trainer:
         )
         wandb.log({"avg_train_loss": average_training_loss})
 
-    def validate_epoch(self, validation_dl: DataLoader, epoch: int, n_epochs: int):
+    def _validate(self, epoch: int, n_epochs: int, batch_num: int):
+        """To be used within the training loop to get validation losses"""
+        self.model.eval()
+        device = self.device
+        validation_losses = []
+
+        with torch.no_grad():
+            for batch in tqdm(self.val_dl, total=len(self.val_dl)):
+                src_tokens = batch["src_tokens"].to(device)
+                tgt_input = batch["tgt_input"].to(device)
+                tgt_output = batch["tgt_output"].to(device)
+                src_mask = batch["src_mask"].to(device)
+                tgt_mask = batch["tgt_mask"].to(device)
+
+                output = self.model(src_tokens, tgt_input, src_mask, tgt_mask)
+
+                loss = self.criterion(
+                    output.view(-1, output.size(-1)), tgt_output.view(-1)
+                )
+                validation_losses.append(loss.item())
+
+        avg_val_loss = sum(validation_losses) / len(validation_losses)
+        self.val_losses.append(avg_val_loss)
+        print(
+            f"Epoch {epoch + 1}/{n_epochs}, Batch {batch_num}, Average validation loss: {avg_val_loss: .4f}"
+        )
+        wandb.log({"val_loss": avg_val_loss})
+        # put the model back into train mode
+        self.model.train()
+        return avg_val_loss
+
+    def validate_epoch(self, epoch: int, n_epochs: int):
         self.model.eval()
         validation_losses = []
         device = self.device
         total_bleu_score = 0
 
         with torch.no_grad():
-            for batch in tqdm(validation_dl):
+            for batch in tqdm(self.val_dl):
                 src_tokens = batch["src_tokens"].to(device)
                 tgt_input = batch["tgt_input"].to(device)
                 tgt_output = batch["tgt_output"].to(device)
@@ -148,7 +196,7 @@ class Trainer:
                 )
 
         avg_val_loss = sum(validation_losses) / len(validation_losses)
-        avg_bleu_score = total_bleu_score / len(valid_dl)
+        avg_bleu_score = total_bleu_score / len(self.val_dl)
         self.val_losses.append(avg_val_loss)
         self.avg_bleu_scores.append(avg_bleu_score)
         print(
@@ -160,8 +208,6 @@ class Trainer:
 
     def train(
         self,
-        training_dl: DataLoader,
-        validation_dl: DataLoader,
         n_epochs: int,
         save_dir: str,
     ):
@@ -171,10 +217,10 @@ class Trainer:
         loss_save_path = os.path.join(save_dir, "losses.pth")
         for epoch in range(n_epochs):
             print(f"Epoch {epoch + 1}/{n_epochs}")
-            self.train_epoch(training_dl=training_dl, epoch=epoch, n_epochs=n_epochs)
-            avg_val_loss = self.validate_epoch(
-                validation_dl=validation_dl, epoch=epoch, n_epochs=n_epochs
+            self.train_epoch(
+                epoch=epoch, n_epochs=n_epochs, model_save_path=model_save_path
             )
+            avg_val_loss = self.validate_epoch(epoch=epoch, n_epochs=n_epochs)
 
             if avg_val_loss < self.best_val_loss:
                 print(f"Validation loss has improved!")
@@ -205,7 +251,42 @@ if __name__ == "__main__":
 
     from data_processing import TranslationDataset, collate_fn
     from datasets import load_dataset
-    from tokenizers import ByteLevelBPETokenizer
+    import argparse
+
+    # Set up argument parser
+    parser = argparse.ArgumentParser(
+        description="Train a transformer model for translation."
+    )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=32,
+        help="Batch size for training and validation.",
+    )
+    parser.add_argument(
+        "--n_epochs", type=int, default=3, help="Number of epochs to train the model."
+    )
+    parser.add_argument(
+        "--save_dir",
+        type=str,
+        default="test_model",
+        help="Directory to save the model and losses.",
+    )
+    parser.add_argument(
+        "--tokenizer_vocab",
+        type=str,
+        default="transformers-based-translator/de-en-bpetokenizer/vocab.json",
+        help="Path to the tokenizer vocab file.",
+    )
+    parser.add_argument(
+        "--tokenizer_merges",
+        type=str,
+        default="transformers-based-translator/de-en-bpetokenizer/merges.txt",
+        help="Path to the tokenizer merges file.",
+    )
+    args = parser.parse_args()
+
+    import wandb
 
     tokenizer = ByteLevelBPETokenizer(
         "bpe_tokenizer/vocab.json", "bpe_tokenizer/merges.txt"
@@ -217,9 +298,30 @@ if __name__ == "__main__":
     src_lang = "de"
     tgt_lang = "en"
 
+    config = {
+        "num_blocks": 6,
+        "num_heads": 8,
+        "d_model": 512,
+        "d_ff": 2048,
+        "vocab_size": tokenizer.get_vocab_size(),
+        "max_len": 512,
+        "dropout": 0.1,
+        "verbose": False,
+        "betas": (0.9, 0.98),
+        "eps": 1e-9,
+        "warmup_steps": 5000,
+        "batch_size": 64,
+        "num_epochs": 3,
+    }
+
+    api_key = os.getenv("WANDB_API_KEY")
+
+    wandb.init(project="transformers-based-translator", config=config)
+
+    # Download and create Translation Datasets.
     dataset = load_dataset("wmt14", "de-en")
     train_ds = TranslationDataset(
-        dataset["train"].shuffle().select(range(100)),
+        dataset["train"].shuffle(),
         tokenizer=tokenizer,
         src_lang=src_lang,
         tgt_lang=tgt_lang,
@@ -228,7 +330,7 @@ if __name__ == "__main__":
         pad_token_id=PAD_TOKEN_ID,
     )
     val_ds = TranslationDataset(
-        dataset["validation"].shuffle().select(range(10)),
+        dataset["validation"],
         tokenizer=tokenizer,
         src_lang=src_lang,
         tgt_lang=tgt_lang,
@@ -237,35 +339,38 @@ if __name__ == "__main__":
         pad_token_id=PAD_TOKEN_ID,
     )
 
-    model = EncoderDecoder.from_hyperparameters(
-        num_blocks=6,
-        num_heads=8,
-        d_model=512,
-        d_ff=2048,
-        vocab_size=tokenizer.get_vocab_size(),
-    )
-
-    trainer = Trainer(
-        model=model,
-        optimizer=torch.optim.AdamW(
-            model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9
-        ),
-        tokenizer=tokenizer,
-        criterion=nn.NLLLoss(),
-        device=DEVICE,
-        warmup_steps=5000,
-        d_model=512,
-    )
-
+    # create dataloaders
+    batch_size = config["batch_size"]
+    num_workers = 16
     train_dl = DataLoader(
         train_ds,
-        batch_size=16,
+        batch_size=batch_size,
         shuffle=True,
         collate_fn=lambda batch: collate_fn(batch, PAD_TOKEN_ID),
+        num_workers=num_workers,
+        pin_memory=True,
     )
-    valid_dl = DataLoader(
-        val_ds, batch_size=16, collate_fn=lambda batch: collate_fn(batch, PAD_TOKEN_ID)
+    val_dl = DataLoader(
+        val_ds,
+        batch_size=batch_size,
+        collate_fn=lambda batch: collate_fn(batch, PAD_TOKEN_ID),
+        num_workers=num_workers,
+        pin_memory=True,
     )
 
-    print(len(train_dl))
-    trainer.train(train_dl, valid_dl, n_epochs=5, save_dir="test_model")
+    # Instantiate a model
+    model = EncoderDecoder.from_hyperparameters(
+        **config
+    )
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9)
+    trainer = Trainer(
+    model=model,
+    train_dl=train_dl,
+    val_dl=val_dl,
+    tokenizer=tokenizer,
+    optimizer=optimizer,
+    criterion=torch.nn.NLLLoss(),
+    device=DEVICE,
+)
+
+    trainer.train(n_epochs=5, save_dir="test_model")
